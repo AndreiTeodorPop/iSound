@@ -42,7 +42,7 @@ struct ContentView: View {
                         player.isExpanded = true
                     }
                     .fullScreenCover(isPresented: $player.isExpanded) {
-                        NowPlayingView()
+                        NowPlayingView(library: library)
                     }
             }
         }

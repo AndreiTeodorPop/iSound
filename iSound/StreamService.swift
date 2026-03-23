@@ -16,9 +16,10 @@ struct StreamService {
         return try JSONDecoder().decode(StreamResponse.self, from: data)
     }
 
-    /// Downloads audio for a YouTube video and saves it to Documents/ImportedAudio/
-    /// so AudioLibrary.loadExistingTracks() picks it up automatically.
-    static func downloadAudio(for videoId: String, title: String) async throws -> URL {
+    /// Downloads audio to a temp file and returns its URL.
+    /// The caller is responsible for presenting a save location picker
+    /// and copying/moving the file to the chosen destination.
+    static func downloadAudioToTemp(for videoId: String, title: String) async throws -> URL {
         let url = URL(string: "\(baseURL)/download?id=\(videoId)")!
         let (tempURL, response) = try await URLSession.shared.download(from: url)
 
@@ -26,30 +27,40 @@ struct StreamService {
             throw StreamError.downloadFailed
         }
 
-        // Always save to ImportedAudio — same folder AudioLibrary scans
-        let docs      = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let importDir = docs.appendingPathComponent("ImportedAudio", isDirectory: true)
-        try FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
-
+        // Rename the temp file to the proper title so the picker shows the right name
         let sanitized = title
             .replacingOccurrences(of: "/",  with: "-")
             .replacingOccurrences(of: ":",  with: "-")
             .replacingOccurrences(of: "\"", with: "")
             .replacingOccurrences(of: "?",  with: "")
             .replacingOccurrences(of: "*",  with: "")
-        let destURL = importDir.appendingPathComponent("\(sanitized).m4a")
+        let namedURL = tempURL.deletingLastPathComponent()
+                              .appendingPathComponent("\(sanitized).m4a")
 
-        if FileManager.default.fileExists(atPath: destURL.path) {
-            try FileManager.default.removeItem(at: destURL)
+        if FileManager.default.fileExists(atPath: namedURL.path) {
+            try FileManager.default.removeItem(at: namedURL)
         }
-        try FileManager.default.moveItem(at: tempURL, to: destURL)
+        try FileManager.default.moveItem(at: tempURL, to: namedURL)
 
-        return destURL
+        return namedURL
+    }
+
+    /// After user picks a location, also copy to ImportedAudio
+    /// so AudioLibrary picks it up inside the app.
+    static func copyToImportedAudio(from sourceURL: URL, fileName: String) throws {
+        let fileManager = FileManager.default
+        let importDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                            .appendingPathComponent("ImportedAudio", isDirectory: true)
+        try fileManager.createDirectory(at: importDir, withIntermediateDirectories: true)
+        let destURL = importDir.appendingPathComponent(fileName)
+        if fileManager.fileExists(atPath: destURL.path) {
+            try fileManager.removeItem(at: destURL)
+        }
+        try fileManager.copyItem(at: sourceURL, to: destURL)
     }
 
     enum StreamError: LocalizedError {
         case downloadFailed
-
         var errorDescription: String? {
             "Download failed. Make sure the server is running."
         }

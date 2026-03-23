@@ -57,7 +57,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     // MARK: - YouTube streaming
 
-    func playYouTube(url: URL, title: String, artist: String, duration: TimeInterval) {
+    func playYouTube(url: URL, title: String, artist: String, duration: TimeInterval, videoID: String) {
         stopStreamPlayer()
         stop()
 
@@ -71,7 +71,8 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             title: title,
             artist: artist,
             album: "YouTube",
-            duration: duration
+            duration: duration,
+            youtubeVideoID: videoID          // ← stored here
         )
         self.duration = duration
         currentTime = 0

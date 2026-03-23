@@ -9,26 +9,31 @@ struct Track: Identifiable, Hashable {
     let artist: String?
     let album: String?
     let duration: TimeInterval?
+    /// Stored only for YouTube stream tracks so NowPlayingView can pass the
+    /// correct ID to StreamService.downloadAudio — the stream URL itself
+    /// contains a signed token, not the original video ID.
+    let youtubeVideoID: String?
 
     init(url: URL) {
-        self.id       = Self.stableID(for: url)
-        self.url      = url
-        self.title    = url.deletingPathExtension().lastPathComponent
-        self.artist   = nil
-        self.album    = nil
-        self.duration = nil
+        self.id             = Self.stableID(for: url)
+        self.url            = url
+        self.title          = url.deletingPathExtension().lastPathComponent
+        self.artist         = nil
+        self.album          = nil
+        self.duration       = nil
+        self.youtubeVideoID = nil
     }
 
-    init(id: UUID = UUID(), url: URL, title: String, artist: String?, album: String?, duration: TimeInterval?) {
-        // For locally stored files, always derive the ID from the URL for stability.
-        // For stream URLs (YouTube), accept the caller-supplied random UUID.
-        let isLocalFile = url.isFileURL
-        self.id       = isLocalFile ? Self.stableID(for: url) : id
-        self.url      = url
-        self.title    = title
-        self.artist   = artist
-        self.album    = album
-        self.duration = duration
+    init(id: UUID = UUID(), url: URL, title: String, artist: String?,
+         album: String?, duration: TimeInterval?, youtubeVideoID: String? = nil) {
+        let isLocalFile     = url.isFileURL
+        self.id             = isLocalFile ? Self.stableID(for: url) : id
+        self.url            = url
+        self.title          = title
+        self.artist         = artist
+        self.album          = album
+        self.duration       = duration
+        self.youtubeVideoID = youtubeVideoID
     }
 
     /// Produces a deterministic UUID from the file's last path component (filename).
