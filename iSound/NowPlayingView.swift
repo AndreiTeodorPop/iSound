@@ -133,12 +133,6 @@ struct NowPlayingView: View {
 
                 Spacer()
 
-                // Download — only visible for YouTube streams
-                if isYouTubeTrack {
-                    downloadButton
-                    Spacer()
-                }
-
                 // Add to Playlist
                 addToPlaylistButton
 
@@ -170,72 +164,6 @@ struct NowPlayingView: View {
         }
         .onAppear {
             isDownloaded = isAlreadySaved
-        }
-    }
-
-    // MARK: - Download Button
-
-    @ViewBuilder
-    private var downloadButton: some View {
-        Button {
-            guard !isDownloading, !isDownloaded,
-                  let track = player.currentTrack else { return }
-            Task { await downloadCurrentTrack(track) }
-        } label: {
-            ZStack {
-                if isDownloading {
-                    ProgressView().controlSize(.small)
-                } else if isDownloaded {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                } else {
-                    Image(systemName: "arrow.down.circle")
-                        .foregroundStyle(.blue)
-                }
-            }
-            .font(.title3)
-            .frame(width: 28, height: 28)
-            .animation(.spring(response: 0.3), value: isDownloading)
-            .animation(.spring(response: 0.3), value: isDownloaded)
-        }
-        .disabled(isDownloading || isDownloaded)
-        // Present save location picker once temp file is ready
-        .sheet(item: Binding(
-            get: { pendingFileURL.map { IdentifiableURL($0) } },
-            set: { if $0 == nil { pendingFileURL = nil } }
-        )) { identifiable in
-            FileSaverPicker(sourceURL: identifiable.url) { result in
-                pendingFileURL = nil
-                switch result {
-                case .success(let savedURL):
-                    // Do not import into app storage; honor the user’s chosen location
-                    if let id = player.currentTrack?.youtubeVideoID { DownloadedStore.add(id) }
-                    isDownloaded = true
-                    showToast("Saved to \"\(savedURL.deletingLastPathComponent().lastPathComponent)\"")
-                case .failure(let error):
-                    if (error as? FileSaverPicker.FileSaverError) != .cancelled {
-                        showToast(error.localizedDescription, isError: true)
-                    }
-                }
-                isDownloading = false
-            }
-        }
-    }
-
-    private func downloadCurrentTrack(_ track: Track) async {
-        guard let videoID = track.youtubeVideoID else {
-            showToast("Cannot determine video ID", isError: true)
-            return
-        }
-
-        isDownloading = true
-        do {
-            let tempURL = try await StreamService.downloadAudioToTemp(for: videoID, title: track.title)
-            isDownloading = false   // spinner stops; picker takes over
-            await MainActor.run { pendingFileURL = tempURL }
-        } catch {
-            isDownloading = false
-            showToast(error.localizedDescription, isError: true)
         }
     }
 
