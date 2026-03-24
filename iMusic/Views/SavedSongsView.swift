@@ -1,9 +1,3 @@
-//
-//  SavedSongsView.swift
-//  iSound
-//
-//  Created by Pop Andrei on 23.03.2026.
-//
 import SwiftUI
 
 // MARK: - Row
