@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 // MARK: - Toast Model
 
@@ -214,6 +215,12 @@ struct YouTubeSearchView: View {
             .scrollIndicators(.visible)
             .overlay { overlayView }
             .overlay(alignment: .bottom) { toastOverlay }
+            .onReceive(IntentBridge.shared.$pendingYouTubeSearch.compactMap { $0 }) { searchQuery in
+                IntentBridge.shared.pendingYouTubeSearch = nil
+                query = searchQuery
+                searchTask?.cancel()
+                searchTask = Task { await performSearch() }
+            }
         }
     }
 

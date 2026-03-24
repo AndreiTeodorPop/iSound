@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import Combine
 
 // MARK: - Track Card (home screen horizontal scroll)
 
@@ -30,6 +31,8 @@ struct ContentView: View {
     @State private var showingPlaylistAlert = false
     @State private var newPlaylistName = ""
     @State private var showingThemePicker = false
+    @State private var showingSiri = false
+    @State private var selectedTab = 0
 
     private var filteredTracks: [Track] {
         let base = library.tracks
@@ -43,15 +46,18 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView {
+            TabView(selection: $selectedTab) {
                 homeTab
                     .tabItem { Label("Home", systemImage: "house") }
+                    .tag(0)
 
                 YouTubeSearchView(library: library)
                     .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                    .tag(1)
 
                 libraryTab
                     .tabItem { Label("Library", systemImage: "music.note.list") }
+                    .tag(2)
             }
 
             if player.currentTrack != nil {
@@ -68,6 +74,25 @@ struct ContentView: View {
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: player.currentTrack)
+        .onReceive(IntentBridge.shared.$pendingYouTubeSearch.compactMap { $0 }) { query in
+            selectedTab = 1
+            IntentBridge.shared.pendingYouTubeSearch = query  // view will consume it
+        }
+        .onReceive(IntentBridge.shared.$pendingSavedSongSearch.compactMap { $0 }) { name in
+            IntentBridge.shared.pendingSavedSongSearch = nil
+            let q = name.lowercased()
+            if let track = library.tracks.first(where: { $0.title.lowercased().contains(q) || ($0.artist?.lowercased().contains(q) == true) }) {
+                player.play(track: track, queue: library.tracks)
+            }
+        }
+        .onReceive(IntentBridge.shared.$pendingPlaylistName.compactMap { $0 }) { name in
+            IntentBridge.shared.pendingPlaylistName = nil
+            let q = name.lowercased()
+            if let playlist = library.playlists.first(where: { $0.name.lowercased().contains(q) }) {
+                let tracks = library.tracks.filter { playlist.trackIDs.contains($0.id) }
+                player.playAll(tracks: tracks, playlistName: playlist.name)
+            }
+        }
         .alert("New Playlist", isPresented: $showingPlaylistAlert) {
             TextField("Playlist Name", text: $newPlaylistName)
             Button("Cancel", role: .cancel) { newPlaylistName = "" }
@@ -121,13 +146,28 @@ struct ContentView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showingThemePicker = true } label: {
-                        Image(systemName: "paintpalette")
+                    HStack {
+                        Button { showingSiri = true } label: {
+                            Image(systemName: "waveform.and.mic")
+                        }
+                        Button { showingThemePicker = true } label: {
+                            Image(systemName: "paintpalette")
+                        }
                     }
                 }
             }
             .sheet(isPresented: $showingThemePicker) {
                 ThemePickerView()
+            }
+            .sheet(isPresented: $showingSiri) {
+                NavigationStack {
+                    SiriShortcutsView()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showingSiri = false }
+                        }
+                    }
+                }
             }
         }
     }
