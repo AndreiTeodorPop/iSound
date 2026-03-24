@@ -1,7 +1,7 @@
 import Foundation
 
 struct StreamService {
-    static let baseURL = "http://172.20.10.2:8080"
+    static let baseURL = "http://192.168.1.11:8080"
 
     struct StreamResponse: Decodable {
         let url: String
