@@ -4,14 +4,13 @@ struct NowPlayingView: View {
     @EnvironmentObject var player: AudioPlayer
     @Environment(\.dismiss) var dismiss
 
-    // Needed for playlist list + download duplicate check
     @ObservedObject var library: AudioLibrary
 
     @State private var showingQueue            = false
     @State private var showingPlaylistPicker   = false
     @State private var isDownloading           = false
     @State private var isDownloaded            = false
-    @State private var pendingFileURL: URL?    = nil   // triggers save picker
+    @State private var pendingFileURL: URL?    = nil
     @State private var toast: ToastState?      = nil
     @State private var toastTask: Task<Void, Never>?
 
@@ -20,15 +19,18 @@ struct NowPlayingView: View {
         let isError: Bool
     }
 
-    // The current track is a YouTube stream if its album == "YouTube"
     private var isYouTubeTrack: Bool {
         player.currentTrack?.album == "YouTube"
     }
 
-    // Check if the current YouTube track is already saved locally (persisted)
     private var isAlreadySaved: Bool {
         guard let track = player.currentTrack, let videoID = track.youtubeVideoID else { return false }
         return DownloadedStore.contains(videoID)
+    }
+
+    // True if there is a next track in either queue
+    private var hasNext: Bool {
+        !player.upcomingTracks.isEmpty || !player.upcomingYoutubeTracks.isEmpty
     }
 
     var body: some View {
@@ -99,24 +101,24 @@ struct NowPlayingView: View {
 
             // MARK: Main Controls
             HStack(spacing: 50) {
-                Button { playPreviousOrFallback() } label: {
+                Button { player.playPrevious() } label: {
                     Image(systemName: "backward.fill").font(.title)
                 }
                 Button { player.togglePlayPause() } label: {
                     Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                         .font(.system(size: 80))
                 }
-                Button { playNextOrFallback() } label: {
+                Button { player.playNext() } label: {
                     Image(systemName: "forward.fill").font(.title)
                 }
             }
             .foregroundStyle(.primary)
 
-            // MARK: Action Row: Shuffle | Download | Add to Playlist | Queue
+            // MARK: Action Row: Shuffle | Add to Playlist | Queue
             HStack {
                 Spacer()
 
-                // Shuffle
+                // Shuffle (only relevant for local queues)
                 Button { player.toggleShuffle() } label: {
                     Image(systemName: "shuffle")
                         .font(.title3)
@@ -142,7 +144,7 @@ struct NowPlayingView: View {
                 Button { showingQueue = true } label: {
                     Image(systemName: "list.bullet")
                         .font(.title3)
-                        .foregroundStyle(player.upcomingTracks.isEmpty ? .secondary : .primary)
+                        .foregroundStyle(hasNext ? .primary : .secondary)
                 }
                 .sheet(isPresented: $showingQueue) {
                     QueueSheet()
@@ -157,42 +159,12 @@ struct NowPlayingView: View {
         }
         .padding(.bottom, 40)
         .overlay(alignment: .bottom) { toastOverlay }
-        // Reset download state whenever the track changes
         .onChange(of: player.currentTrack?.title) {
             isDownloading = false
             isDownloaded  = isAlreadySaved
         }
         .onAppear {
             isDownloaded = isAlreadySaved
-        }
-    }
-
-    private func playNextOrFallback() {
-        if !player.upcomingTracks.isEmpty {
-            player.playNext()
-            return
-        }
-        guard let current = player.currentTrack else { return }
-        if let idx = library.tracks.firstIndex(where: { $0.id == current.id }) {
-            let nextIdx = library.tracks.index(after: idx)
-            if nextIdx < library.tracks.endIndex {
-                let nextTrack = library.tracks[nextIdx]
-                player.play(track: nextTrack)
-            }
-        }
-    }
-
-    private func playPreviousOrFallback() {
-        if !player.upcomingTracks.isEmpty {
-            player.playPrevious()
-            return
-        }
-        guard let current = player.currentTrack else { return }
-        if let idx = library.tracks.firstIndex(where: { $0.id == current.id }),
-           idx > library.tracks.startIndex {
-            let prevIdx = library.tracks.index(before: idx)
-            let prevTrack = library.tracks[prevIdx]
-            player.play(track: prevTrack)
         }
     }
 
@@ -214,7 +186,6 @@ struct NowPlayingView: View {
             ForEach(library.playlists) { playlist in
                 Button(playlist.name) {
                     guard let track = player.currentTrack else { return }
-                    // For YouTube streams, prefer the downloaded local version if it exists
                     let targetTrack = library.tracks.first { $0.title == track.title } ?? track
                     library.addTrack(targetTrack, to: playlist)
                     showToast("Added to \"\(playlist.name)\"")
@@ -276,29 +247,48 @@ private struct QueueSheet: View {
     @EnvironmentObject var player: AudioPlayer
     @Environment(\.dismiss) var dismiss
 
+    // Unified upcoming item for display
+    private struct QueueItem: Identifiable {
+        let id: String
+        let title: String
+        let artist: String
+    }
+
+    private var queueItems: [QueueItem] {
+        // YouTube queue takes priority when active
+        if player.hasYouTubeQueue {
+            return player.upcomingYoutubeTracks.map {
+                QueueItem(id: $0.id, title: $0.title, artist: $0.channelTitle)
+            }
+        }
+        return player.upcomingTracks.map {
+            QueueItem(id: $0.id.uuidString, title: $0.title, artist: $0.artist ?? "Unknown Artist")
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Group {
-                if player.upcomingTracks.isEmpty {
+                if queueItems.isEmpty {
                     ContentUnavailableView(
                         "No upcoming tracks",
                         systemImage: "list.bullet",
-                        description: Text("Play a playlist to see the queue")
+                        description: Text("Play a playlist or search result to see the queue")
                     )
                 } else {
                     List {
                         Section("Up Next") {
-                            ForEach(Array(player.upcomingTracks.enumerated()), id: \.element.id) { index, track in
+                            ForEach(Array(queueItems.enumerated()), id: \.element.id) { index, item in
                                 HStack(spacing: 12) {
                                     Text("\(index + 1)")
                                         .font(.caption.monospacedDigit())
                                         .foregroundStyle(.secondary)
                                         .frame(width: 24)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(track.title)
+                                        Text(item.title)
                                             .font(.headline)
                                             .lineLimit(1)
-                                        Text(track.artist ?? "Unknown Artist")
+                                        Text(item.artist)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }

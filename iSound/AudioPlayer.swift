@@ -12,7 +12,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var currentTrack: Track?
     @Published var isExpanded: Bool = false
-    @Published var isShuffled: Bool = false  // NEW
+    @Published var isShuffled: Bool = false
 
     private var player: AVAudioPlayer?
     private var timer: Timer?
@@ -21,13 +21,42 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var routeChangeObserver: Any?
     private var observationTask: Task<Void, Never>?
 
-    // Original order preserved so we can un-shuffle
+    // Local track queue
     private var originalQueue: [Track] = []
     private var playlistQueue: [Track] = []
     private var currentIndex: Int = 0
 
+    // YouTube queue
+    private var youtubeQueue: [YouTubeResult] = []
+    private var youtubeIndex: Int = 0
+    private var isLoadingNextYouTube: Bool = false
+
     private var streamPlayer: AVPlayer?
     private var streamTimeObserver: Any?
+
+    // MARK: - YouTube Queue
+
+    /// Call this from YouTubeSearchView when playing a result,
+    /// passing the full results list so next/previous works.
+    func setYouTubeQueue(_ results: [YouTubeResult], startingAt index: Int) {
+        youtubeQueue = results
+        youtubeIndex = index
+        // Clear local queue so next/previous routes to YouTube queue
+        playlistQueue = []
+        originalQueue = []
+    }
+
+    func clearYouTubeQueue() {
+        youtubeQueue = []
+        youtubeIndex = 0
+    }
+
+    var hasYouTubeQueue: Bool { !youtubeQueue.isEmpty }
+
+    var upcomingYoutubeTracks: [YouTubeResult] {
+        guard youtubeIndex + 1 < youtubeQueue.count else { return [] }
+        return Array(youtubeQueue[(youtubeIndex + 1)...])
+    }
 
     // MARK: - Shuffle
 
@@ -36,13 +65,11 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         guard !playlistQueue.isEmpty else { return }
         let current = playlistQueue[currentIndex]
         if isShuffled {
-            // Shuffle remaining tracks, keep current at front
             var remaining = originalQueue.filter { $0.id != current.id }
             remaining.shuffle()
             playlistQueue = [current] + remaining
             currentIndex = 0
         } else {
-            // Restore original order, seek to current track's position
             playlistQueue = originalQueue
             currentIndex = originalQueue.firstIndex { $0.id == current.id } ?? 0
         }
@@ -72,7 +99,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             artist: artist,
             album: "YouTube",
             duration: duration,
-            youtubeVideoID: videoID          // ← stored here
+            youtubeVideoID: videoID
         )
         self.duration = duration
         currentTime = 0
@@ -150,6 +177,8 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     // MARK: - Playback
 
     func play(track: Track) {
+        // Playing a local track clears the YouTube queue
+        clearYouTubeQueue()
         stop()
         do {
             let player = try AVAudioPlayer(contentsOf: track.url)
@@ -208,6 +237,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     func playAll(tracks: [Track]) {
         guard !tracks.isEmpty else { return }
+        clearYouTubeQueue()
         originalQueue = tracks
         playlistQueue = isShuffled ? tracks.shuffled() : tracks
         currentIndex = 0
@@ -215,12 +245,44 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     func playNext() {
+        // YouTube queue takes priority
+        if !youtubeQueue.isEmpty {
+            guard youtubeIndex + 1 < youtubeQueue.count else { stop(); return }
+            guard !isLoadingNextYouTube else { return }
+            isLoadingNextYouTube = true
+            youtubeIndex += 1
+            let next = youtubeQueue[youtubeIndex]
+            Task {
+                await streamYouTubeResult(next)
+                isLoadingNextYouTube = false
+            }
+            return
+        }
+        // Local queue
         guard currentIndex + 1 < playlistQueue.count else { stop(); return }
         currentIndex += 1
         play(track: playlistQueue[currentIndex])
     }
 
     func playPrevious() {
+        // YouTube queue
+        if !youtubeQueue.isEmpty {
+            if currentTime > 3 {
+                seek(to: 0)
+                return
+            }
+            guard youtubeIndex > 0 else { seek(to: 0); return }
+            guard !isLoadingNextYouTube else { return }
+            isLoadingNextYouTube = true
+            youtubeIndex -= 1
+            let prev = youtubeQueue[youtubeIndex]
+            Task {
+                await streamYouTubeResult(prev)
+                isLoadingNextYouTube = false
+            }
+            return
+        }
+        // Local queue
         if currentTime > 3 {
             seek(to: 0)
         } else if currentIndex > 0 {
@@ -228,6 +290,23 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             play(track: playlistQueue[currentIndex])
         } else {
             seek(to: 0)
+        }
+    }
+
+    /// Fetches the stream URL for a YouTube result and plays it.
+    private func streamYouTubeResult(_ result: YouTubeResult) async {
+        do {
+            let stream = try await StreamService.getStreamURL(for: result.id)
+            guard let url = URL(string: stream.url) else { return }
+            playYouTube(
+                url: url,
+                title: stream.title,
+                artist: stream.artist,
+                duration: stream.duration,
+                videoID: result.id
+            )
+        } catch {
+            print("Failed to stream YouTube result: \(error)")
         }
     }
 

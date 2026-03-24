@@ -41,8 +41,6 @@ private struct ToastView: View {
 
 // MARK: - Per-Row Download State
 
-/// Each row manages its own pending file URL so the save picker
-/// can be presented independently per result.
 private struct YouTubeResultRow: View {
     let result: YouTubeResult
     let isStreaming: Bool
@@ -50,7 +48,7 @@ private struct YouTubeResultRow: View {
     let isDownloading: Bool
     let isDownloaded: Bool
     let onPlay: () -> Void
-    let onDownloaded: (URL) -> Void   // called with the chosen save URL
+    let onDownloaded: (URL) -> Void
     let onDownloadError: (Error) -> Void
 
     @ObservedObject var library: AudioLibrary
@@ -58,7 +56,6 @@ private struct YouTubeResultRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Leading: stream state
             ZStack {
                 if isStreaming {
                     ProgressView().frame(width: 24, height: 24)
@@ -69,7 +66,6 @@ private struct YouTubeResultRow: View {
                 }
             }
 
-            // Title + channel
             VStack(alignment: .leading, spacing: 3) {
                 Text(result.title).font(.headline).lineLimit(2)
                 Text(result.channelTitle).font(.caption).foregroundStyle(.secondary)
@@ -77,7 +73,6 @@ private struct YouTubeResultRow: View {
 
             Spacer()
 
-            // Duration + download button
             HStack(spacing: 10) {
                 if result.durationSeconds > 0 {
                     Text(timeString(result.durationSeconds))
@@ -89,7 +84,6 @@ private struct YouTubeResultRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onPlay)
-        // Present save picker when temp file is ready
         .sheet(item: Binding(
             get: { pendingFileURL.map { IdentifiableURL($0) } },
             set: { if $0 == nil { pendingFileURL = nil } }
@@ -98,7 +92,6 @@ private struct YouTubeResultRow: View {
                 pendingFileURL = nil
                 switch result {
                 case .success(let savedURL):
-                    // Copy to ImportedAudio for in-app playback
                     let fileName = identifiable.url.lastPathComponent
                     try? StreamService.copyToImportedAudio(from: savedURL, fileName: fileName)
                     onDownloaded(savedURL)
@@ -143,7 +136,7 @@ private struct YouTubeResultRow: View {
                 for: result.id,
                 title: result.title
             )
-            pendingFileURL = tempURL  // triggers save picker sheet
+            pendingFileURL = tempURL
         } catch {
             onDownloadError(error)
         }
@@ -178,7 +171,7 @@ struct YouTubeSearchView: View {
                 YouTubeResultRow(
                     result: result,
                     isStreaming:    isLoadingID == result.id,
-                    isCurrentTrack: player.currentTrack?.title == result.title,
+                    isCurrentTrack: player.currentTrack?.youtubeVideoID == result.id,
                     isDownloading:  downloadingIDs.contains(result.id),
                     isDownloaded:   downloadedIDs.contains(result.id),
                     onPlay:  { Task { await playResult(result) } },
@@ -197,8 +190,6 @@ struct YouTubeSearchView: View {
                     library: library
                 )
                 .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
-                // Mark as downloading when row kicks off the request
-                .onChange(of: downloadingIDs.contains(result.id)) { }
             }
             .navigationTitle("Search")
             .searchable(text: $query, prompt: "Search songs, artists…")
@@ -214,6 +205,12 @@ struct YouTubeSearchView: View {
     private func playResult(_ result: YouTubeResult) async {
         guard isLoadingID == nil else { return }
         isLoadingID = result.id
+
+        // Find the tapped result's index and register the full list as the queue
+        if let index = results.firstIndex(where: { $0.id == result.id }) {
+            player.setYouTubeQueue(results, startingAt: index)
+        }
+
         do {
             let stream = try await StreamService.getStreamURL(for: result.id)
             guard let url = URL(string: stream.url) else {
