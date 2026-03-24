@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "756BD49E2F65FB1300D9056A"
-               BuildableName = "iSound.app"
-               BlueprintName = "iSound"
-               ReferencedContainer = "container:iSound.xcodeproj">
+               BuildableName = "iMusic.app"
+               BlueprintName = "iMusic"
+               ReferencedContainer = "container:iMusic.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -45,9 +45,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "756BD49E2F65FB1300D9056A"
-            BuildableName = "iSound.app"
-            BlueprintName = "iSound"
-            ReferencedContainer = "container:iSound.xcodeproj">
+            BuildableName = "iMusic.app"
+            BlueprintName = "iMusic"
+            ReferencedContainer = "container:iMusic.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -62,9 +62,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "756BD49E2F65FB1300D9056A"
-            BuildableName = "iSound.app"
-            BlueprintName = "iSound"
-            ReferencedContainer = "container:iSound.xcodeproj">
+            BuildableName = "iMusic.app"
+            BlueprintName = "iMusic"
+            ReferencedContainer = "container:iMusic.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct iSoundApp: App {
+struct iMusicApp: App {
     @StateObject private var sharedPlayer = AudioPlayer()
     
     var body: some Scene {
