@@ -194,6 +194,11 @@ struct ContentView: View {
                     }
                 }
             }
+            .onDelete { indexSet in
+                for index in indexSet {
+                    library.deletePlaylist(library.playlists[index])
+                }
+            }
         }
     }
 

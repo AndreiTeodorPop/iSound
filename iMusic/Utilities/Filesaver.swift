@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 // MARK: - Identifiable URL (used as .sheet(item:) binding)
@@ -21,8 +22,6 @@ struct FileSaverPicker: UIViewControllerRepresentable {
         let picker = UIDocumentPickerViewController(forExporting: [sourceURL], asCopy: true)
         picker.shouldShowFileExtensions = true
         picker.delegate = context.coordinator
-        picker.directoryURL = FileManager.default
-            .urls(for: .downloadsDirectory, in: .userDomainMask).first
         return picker
     }
 

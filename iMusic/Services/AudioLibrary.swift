@@ -45,6 +45,11 @@ final class AudioLibrary: ObservableObject {
         savePlaylists()
     }
 
+    func deletePlaylist(_ playlist: Playlist) {
+        playlists.removeAll { $0.id == playlist.id }
+        savePlaylists()
+    }
+
     func addTrack(_ track: Track, to playlist: Playlist) {
         guard let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
         playlists[index].trackIDs.insert(track.id)

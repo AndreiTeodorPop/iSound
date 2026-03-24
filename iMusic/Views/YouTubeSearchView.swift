@@ -53,6 +53,7 @@ private struct YouTubeResultRow: View {
 
     @ObservedObject var library: AudioLibrary
     @State private var pendingFileURL: URL? = nil
+    @State private var showingDuplicateAlert = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -107,8 +108,11 @@ private struct YouTubeResultRow: View {
     @ViewBuilder
     private var downloadButton: some View {
         Button {
-            guard !isDownloading, !isDownloaded else { return }
-            Task { await startDownload() }
+            if isDownloaded {
+                showingDuplicateAlert = true
+            } else if !isDownloading {
+                Task { await startDownload() }
+            }
         } label: {
             ZStack {
                 if isDownloading {
@@ -127,7 +131,12 @@ private struct YouTubeResultRow: View {
             .animation(.spring(response: 0.3), value: isDownloaded)
         }
         .buttonStyle(.plain)
-        .disabled(isDownloading || isDownloaded)
+        .disabled(isDownloading)
+        .alert("Already Downloaded", isPresented: $showingDuplicateAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("\"\(result.title)\" is already in your library.")
+        }
     }
 
     private func startDownload() async {

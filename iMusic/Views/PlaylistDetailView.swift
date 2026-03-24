@@ -7,6 +7,8 @@ struct PlaylistDetailView: View {
     @EnvironmentObject var player: AudioPlayer
 
     @State private var showingAddSongs = false
+    @State private var showingDeleteConfirmation = false
+    @Environment(\.dismiss) private var dismiss
 
     // MARK: - Live lookup (never stale)
 
@@ -52,8 +54,26 @@ struct PlaylistDetailView: View {
                                 Image(systemName: "plus")
                             }
                             EditButton()
+                            Button(role: .destructive) {
+                                showingDeleteConfirmation = true
+                            } label: {
+                                Image(systemName: "trash")
+                            }
                         }
                     }
+                }
+                .confirmationDialog(
+                    "Delete \"\(playlist.name)\"?",
+                    isPresented: $showingDeleteConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete Playlist", role: .destructive) {
+                        library.deletePlaylist(playlist)
+                        dismiss()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This will remove the playlist but won't delete your songs.")
                 }
                 .overlay {
                     if tracksInPlaylist.isEmpty {
