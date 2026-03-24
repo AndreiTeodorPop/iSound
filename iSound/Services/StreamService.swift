@@ -45,18 +45,6 @@ struct StreamService {
         return namedURL
     }
 
-    /// After user picks a location, also copy to ImportedAudio
-    /// so AudioLibrary picks it up inside the app.
-    static func copyToImportedAudio(from sourceURL: URL, fileName: String) throws {
-        let fileManager = FileManager.default
-        let importDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                            .appendingPathComponent("ImportedAudio", isDirectory: true)
-        try fileManager.createDirectory(at: importDir, withIntermediateDirectories: true)
-        let destURL = importDir.appendingPathComponent(fileName)
-        guard !fileManager.fileExists(atPath: destURL.path) else { return }
-        try fileManager.copyItem(at: sourceURL, to: destURL)
-    }
-
     enum StreamError: LocalizedError {
         case downloadFailed
         var errorDescription: String? {

@@ -14,6 +14,8 @@ struct Track: Identifiable, Hashable {
     /// contains a signed token, not the original video ID.
     let youtubeVideoID: String?
 
+    var isYouTubeTrack: Bool { youtubeVideoID != nil }
+
     init(url: URL) {
         self.id             = Self.stableID(for: url)
         self.url            = url
@@ -58,5 +60,16 @@ struct Track: Identifiable, Hashable {
         let d = UInt16((hash & 0x3FFF) | 0x8000) // variant bits
         let e = string.utf8.prefix(6).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
         return String(format: "%08X-%04X-%04X-%04X-%012X", a, b, c, d, e)
+    }
+}
+
+// MARK: - Time Formatting
+
+extension TimeInterval {
+    /// Formats a duration as "m:ss" (e.g. "3:07"). Returns "0:00" for non-finite values.
+    var mmss: String {
+        guard isFinite else { return "0:00" }
+        let total = Int(rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

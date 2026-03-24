@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Toast Model
 
-private enum ToastType {
+enum ToastType {
     case success(String)
     case error(String)
 
@@ -25,7 +25,7 @@ private enum ToastType {
     }
 }
 
-private struct ToastView: View {
+struct ToastView: View {
     let toast: ToastType
     var body: some View {
         HStack(spacing: 10) {
@@ -75,7 +75,7 @@ private struct YouTubeResultRow: View {
 
             HStack(spacing: 10) {
                 if result.durationSeconds > 0 {
-                    Text(timeString(result.durationSeconds))
+                    Text(result.durationSeconds.mmss)
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -93,7 +93,7 @@ private struct YouTubeResultRow: View {
                 switch result {
                 case .success(let savedURL):
                     let fileName = identifiable.url.lastPathComponent
-                    try? StreamService.copyToImportedAudio(from: savedURL, fileName: fileName)
+                    try? library.copyToImportedAudio(from: savedURL, fileName: fileName)
                     onDownloaded(savedURL)
                 case .failure(let error):
                     if (error as? FileSaverPicker.FileSaverError) != .cancelled {
@@ -142,10 +142,6 @@ private struct YouTubeResultRow: View {
         }
     }
 
-    private func timeString(_ t: TimeInterval) -> String {
-        let total = Int(t); let m = total / 60; let s = total % 60
-        return String(format: "%d:%02d", m, s)
-    }
 }
 
 // MARK: - Main View

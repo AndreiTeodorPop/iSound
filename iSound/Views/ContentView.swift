@@ -1,6 +1,25 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+// MARK: - Track Card (home screen horizontal scroll)
+
+struct TrackCard: View {
+    let track: Track
+    var body: some View {
+        VStack(alignment: .leading) {
+            TrackArtworkView(size: 140, cornerRadius: 8)
+            Text(track.title)
+                .font(.subheadline).bold()
+                .lineLimit(1)
+            Text(track.artist ?? "Unknown Artist")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(width: 140)
+    }
+}
+
 struct ContentView: View {
     @StateObject private var library = AudioLibrary()
     @EnvironmentObject private var player: AudioPlayer
@@ -70,9 +89,6 @@ struct ContentView: View {
             case .failure(let error):
                 print("Import failed: \(error.localizedDescription)")
             }
-        }
-        .onAppear {
-            player.configureAudioSession()
         }
     }
 

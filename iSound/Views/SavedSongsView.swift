@@ -23,14 +23,7 @@ private struct SavedTrackRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Artwork placeholder
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.secondary.opacity(0.2))
-                .frame(width: 44, height: 44)
-                .overlay(
-                    Image(systemName: "music.note")
-                        .foregroundStyle(.secondary)
-                )
+            TrackArtworkView(size: 44)
 
             // Title + artist
             VStack(alignment: .leading, spacing: 2) {
@@ -86,8 +79,7 @@ struct SavedSongsView: View {
     @ObservedObject var library: AudioLibrary
     @EnvironmentObject private var player: AudioPlayer
 
-    // Confirmation toast
-    @State private var toastMessage: String? = nil
+    @State private var toast: ToastType?
     @State private var toastTask: Task<Void, Never>?
 
     var body: some View {
@@ -101,17 +93,15 @@ struct SavedSongsView: View {
                     onTap: { player.play(track: track, queue: library.tracks) },
                     onAddToPlaylist: { playlist in
                         library.addTrack(track, to: playlist)
-                        showToast("Added to \"\(playlist.name)\"")
+                        showToast(.success("Added to \"\(playlist.name)\""))
                     }
                 )
             }
             .onDelete { indexSet in
                 for index in indexSet {
                     let track = library.tracks[index]
-                    if player.currentTrack?.id == track.id {
-                        player.stop()
-                    }
-                    Task { await library_removeTrackFromDiskAndReload(track, in: library) }
+                    if player.currentTrack?.id == track.id { player.stop() }
+                    Task { await library.deleteTrack(track) }
                 }
             }
         }
@@ -136,55 +126,25 @@ struct SavedSongsView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if let message = toastMessage {
-                toastBanner(message)
-                    .padding(.bottom, 100) // clears mini-player
+            if let t = toast {
+                ToastView(toast: t)
+                    .padding(.bottom, 100)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.3), value: toastMessage)
+        .animation(.spring(response: 0.3), value: toast != nil)
     }
 
     // MARK: - Toast
 
-    private func showToast(_ message: String) {
+    private func showToast(_ type: ToastType) {
         toastTask?.cancel()
-        toastMessage = message
+        withAnimation(.spring(response: 0.3)) { toast = type }
         toastTask = Task {
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: .seconds(2.5))
             guard !Task.isCancelled else { return }
-            toastMessage = nil
+            withAnimation(.easeOut) { toast = nil }
         }
-    }
-
-    private func toastBanner(_ message: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-            Text(message)
-                .font(.subheadline.weight(.medium))
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.green.opacity(0.3), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
-    }
-}
-// MARK: - Deletion helper (non-conflicting)
-@MainActor
-func library_removeTrackFromDiskAndReload(_ track: Track, in library: AudioLibrary) async {
-    let fm = FileManager.default
-    do {
-        if fm.fileExists(atPath: track.url.path) {
-            try fm.removeItem(at: track.url)
-        }
-        await library.loadExistingTracks()
-    } catch {
-        print("Failed to delete track: \(error)")
     }
 }
 

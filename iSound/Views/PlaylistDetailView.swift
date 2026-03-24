@@ -180,10 +180,7 @@ private struct AddSongsSheet: View {
         NavigationStack {
             List(tracks, id: \.id) { track in
                 HStack(spacing: 12) {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.secondary.opacity(0.2))
-                        .frame(width: 40, height: 40)
-                        .overlay(Image(systemName: "music.note").foregroundStyle(.secondary))
+                    TrackArtworkView(size: 40)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(track.title).font(.headline).lineLimit(1)

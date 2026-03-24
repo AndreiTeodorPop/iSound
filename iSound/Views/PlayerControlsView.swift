@@ -1,5 +1,23 @@
 import SwiftUI
 
+// MARK: - Shared artwork placeholder used across the app
+
+struct TrackArtworkView: View {
+    var size: CGFloat = 44
+    var cornerRadius: CGFloat = 6
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius)
+            .fill(Color.secondary.opacity(0.2))
+            .frame(width: size, height: size)
+            .overlay(
+                Image(systemName: "music.note")
+                    .font(size >= 80 ? .largeTitle : .body)
+                    .foregroundStyle(.secondary)
+            )
+    }
+}
+
 struct PlayerControlsView: View {
     @EnvironmentObject private var player: AudioPlayer
 
@@ -41,14 +59,7 @@ struct PlayerControlsView: View {
     // MARK: - Subcomponents
     
     private var albumArtPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 4)
-            .fill(.secondary.opacity(0.3))
-            .frame(width: 40, height: 40)
-            .overlay(
-                Image(systemName: "music.note")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            )
+        TrackArtworkView(size: 40, cornerRadius: 4)
     }
 
     private var playbackButton: some View {
@@ -65,7 +76,7 @@ struct PlayerControlsView: View {
 
     private var progressSlider: some View {
         HStack(spacing: 8) {
-            Text(timeString(player.currentTime))
+            Text(player.currentTime.mmss)
                 .font(.caption2.monospacedDigit())
             
             Slider(value: Binding(
@@ -78,16 +89,9 @@ struct PlayerControlsView: View {
             .controlSize(.mini)
             .tint(.primary) // Modern replacement for accentColor
 
-            Text(timeString(player.duration))
+            Text(player.duration.mmss)
                 .font(.caption2.monospacedDigit())
         }
     }
 
-    private func timeString(_ t: TimeInterval) -> String {
-        guard t.isFinite else { return "0:00" }
-        let total = Int(t.rounded())
-        let m = total / 60
-        let s = total % 60
-        return String(format: "%d:%02d", m, s)
-    }
 }

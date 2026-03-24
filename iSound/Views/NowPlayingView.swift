@@ -6,27 +6,10 @@ struct NowPlayingView: View {
 
     @ObservedObject var library: AudioLibrary
 
-    @State private var showingQueue            = false
-    @State private var showingPlaylistPicker   = false
-    @State private var isDownloading           = false
-    @State private var isDownloaded            = false
-    @State private var pendingFileURL: URL?    = nil
-    @State private var toast: ToastState?      = nil
+    @State private var showingQueue          = false
+    @State private var showingPlaylistPicker = false
+    @State private var toast: ToastType?
     @State private var toastTask: Task<Void, Never>?
-
-    private struct ToastState {
-        let message: String
-        let isError: Bool
-    }
-
-    private var isYouTubeTrack: Bool {
-        player.currentTrack?.album == "YouTube"
-    }
-
-    private var isAlreadySaved: Bool {
-        guard let track = player.currentTrack, let videoID = track.youtubeVideoID else { return false }
-        return DownloadedStore.contains(videoID)
-    }
 
     // True if there is a next track in either queue
     private var hasNext: Bool {
@@ -92,9 +75,9 @@ struct NowPlayingView: View {
                 .tint(.primary)
 
                 HStack {
-                    Text(timeString(player.currentTime)).font(.caption.monospacedDigit())
+                    Text(player.currentTime.mmss).font(.caption.monospacedDigit())
                     Spacer()
-                    Text(timeString(player.duration)).font(.caption.monospacedDigit())
+                    Text(player.duration.mmss).font(.caption.monospacedDigit())
                 }
             }
             .padding(.horizontal, 30)
@@ -159,21 +142,14 @@ struct NowPlayingView: View {
         }
         .padding(.bottom, 40)
         .overlay(alignment: .bottom) { toastOverlay }
-        .onChange(of: player.currentTrack?.title) {
-            isDownloading = false
-            isDownloaded  = isAlreadySaved
-        }
-        .onAppear {
-            isDownloaded = isAlreadySaved
-        }
     }
 
     // MARK: - Add to Playlist Button
 
     private var eligiblePlaylists: [Playlist] {
         guard let track = player.currentTrack else { return [] }
-        let targetTrack = library.tracks.first { $0.title == track.title } ?? track
-        return library.playlists.filter { !$0.trackIDs.contains(targetTrack.id) }
+        let resolved = library.localTrack(matching: track)
+        return library.playlists.filter { !$0.trackIDs.contains(resolved.id) }
     }
 
     @ViewBuilder
@@ -192,9 +168,8 @@ struct NowPlayingView: View {
             ForEach(eligiblePlaylists) { playlist in
                 Button(playlist.name) {
                     guard let track = player.currentTrack else { return }
-                    let targetTrack = library.tracks.first { $0.title == track.title } ?? track
-                    library.addTrack(targetTrack, to: playlist)
-                    showToast("Added to \"\(playlist.name)\"")
+                    library.addTrack(library.localTrack(matching: track), to: playlist)
+                    showToast(.success("Added to \"\(playlist.name)\""))
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -203,11 +178,9 @@ struct NowPlayingView: View {
 
     // MARK: - Toast
 
-    private func showToast(_ message: String, isError: Bool = false) {
+    private func showToast(_ type: ToastType) {
         toastTask?.cancel()
-        withAnimation(.spring(response: 0.3)) {
-            toast = ToastState(message: message, isError: isError)
-        }
+        withAnimation(.spring(response: 0.3)) { toast = type }
         toastTask = Task {
             try? await Task.sleep(for: .seconds(2.5))
             guard !Task.isCancelled else { return }
@@ -218,33 +191,12 @@ struct NowPlayingView: View {
     @ViewBuilder
     private var toastOverlay: some View {
         if let t = toast {
-            HStack(spacing: 8) {
-                Image(systemName: t.isError ? "xmark.circle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(t.isError ? .red : .green)
-                Text(t.message)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(2)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke((t.isError ? Color.red : Color.green).opacity(0.3), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
-            .padding(.bottom, 50)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            ToastView(toast: t)
+                .padding(.bottom, 50)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
-    // MARK: - Helpers
-
-    private func timeString(_ t: TimeInterval) -> String {
-        guard t.isFinite else { return "0:00" }
-        let total = Int(t.rounded()); let m = total / 60; let s = total % 60
-        return String(format: "%d:%02d", m, s)
-    }
 }
 
 // MARK: - Queue Sheet

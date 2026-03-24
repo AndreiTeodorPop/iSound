@@ -97,7 +97,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             url: url,
             title: title,
             artist: artist,
-            album: "YouTube",
+            album: nil,
             duration: duration,
             youtubeVideoID: videoID
         )

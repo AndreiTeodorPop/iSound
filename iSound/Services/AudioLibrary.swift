@@ -182,6 +182,21 @@ final class AudioLibrary: ObservableObject {
         await loadExistingTracks()
     }
 
+    /// Copies a downloaded file into ImportedAudio. Skips silently if already present.
+    func copyToImportedAudio(from sourceURL: URL, fileName: String) throws {
+        try ensureImportDirectory()
+        let destURL = importDirectory.appendingPathComponent(fileName)
+        guard !fileManager.fileExists(atPath: destURL.path) else { return }
+        try fileManager.copyItem(at: sourceURL, to: destURL)
+    }
+
+    /// For a YouTube stream track, returns the matching downloaded local file by title.
+    /// Returns the track itself if it is already a local file track.
+    func localTrack(matching track: Track) -> Track {
+        guard track.isYouTubeTrack else { return track }
+        return tracks.first { $0.title == track.title } ?? track
+    }
+
     // MARK: - Helpers
 
     private func buildTrack(from url: URL) async -> Track {
