@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NowPlayingView: View {
     @EnvironmentObject var player: AudioPlayer
+    @EnvironmentObject private var themeManager: ThemeManager
     @Environment(\.dismiss) var dismiss
 
     @ObservedObject var library: AudioLibrary
@@ -42,7 +43,7 @@ struct NowPlayingView: View {
 
             // MARK: Album Art
             RoundedRectangle(cornerRadius: 20)
-                .fill(Color.accentColor.gradient)
+                .fill(themeManager.current.accent.gradient)
                 .aspectRatio(1, contentMode: .fit)
                 .overlay(
                     Image(systemName: "music.note")
@@ -106,11 +107,11 @@ struct NowPlayingView: View {
                 Button { player.toggleShuffle() } label: {
                     Image(systemName: "shuffle")
                         .font(.title3)
-                        .foregroundStyle(player.isShuffled ? Color.accentColor : .secondary)
+                        .foregroundStyle(player.isShuffled ? themeManager.current.accent : .secondary)
                         .overlay(alignment: .bottom) {
                             if player.isShuffled {
                                 Circle()
-                                    .fill(Color.accentColor)
+                                    .fill(themeManager.current.accent)
                                     .frame(width: 5, height: 5)
                                     .offset(y: 8)
                             }
@@ -328,7 +329,7 @@ private struct DevicePickerSheet: View {
                     }
                 }
             }
-            .navigationTitle("Cast To")
+            .navigationTitle("Cast devices")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

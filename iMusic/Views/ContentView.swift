@@ -23,11 +23,13 @@ struct TrackCard: View {
 struct ContentView: View {
     @StateObject private var library = AudioLibrary()
     @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var themeManager: ThemeManager
 
     @State private var searchText: String = ""
     @State private var showingImporter = false
     @State private var showingPlaylistAlert = false
     @State private var newPlaylistName = ""
+    @State private var showingThemePicker = false
 
     private var filteredTracks: [Track] {
         let base = library.tracks
@@ -117,6 +119,16 @@ struct ContentView: View {
             .navigationDestination(for: UUID.self) { id in
                 PlaylistDetailView(playlistID: id, library: library)
             }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingThemePicker = true } label: {
+                        Image(systemName: "paintpalette")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingThemePicker) {
+                ThemePickerView()
+            }
         }
     }
 
@@ -148,7 +160,7 @@ struct ContentView: View {
             } label: {
                 HStack {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.pink.gradient)
+                        .fill(themeManager.current.secondaryAccent.gradient)
                         .frame(width: 50, height: 50)
                         .overlay(Image(systemName: "music.note").foregroundColor(.white))
                     VStack(alignment: .leading, spacing: 2) {
@@ -175,7 +187,7 @@ struct ContentView: View {
                 NavigationLink(value: playlist.id) {
                     HStack {
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.accentColor.gradient)
+                            .fill(themeManager.current.accent.gradient)
                             .frame(width: 50, height: 50)
                             .overlay(Image(systemName: "music.note.list").foregroundColor(.white))
                         Text(playlist.name).font(.headline)
@@ -208,7 +220,7 @@ struct ContentView: View {
     private func playlistCard(_ playlist: Playlist) -> some View {
         VStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.accentColor.gradient)
+                .fill(themeManager.current.accent.gradient)
                 .frame(width: 140, height: 140)
                 .overlay(Image(systemName: "music.note.list").font(.largeTitle).foregroundColor(.white))
             Text(playlist.name).font(.subheadline).bold().lineLimit(1).foregroundStyle(.primary)
@@ -224,7 +236,7 @@ struct ContentView: View {
             }
             Spacer()
             if player.currentTrack?.id == track.id {
-                Image(systemName: "waveform").foregroundStyle(Color.accentColor)
+                Image(systemName: "waveform").foregroundStyle(themeManager.current.accent)
             }
         }
         .contentShape(Rectangle())
