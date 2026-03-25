@@ -33,6 +33,8 @@ struct ContentView: View {
     @State private var showingThemePicker = false
     @State private var showingSiri = false
     @State private var selectedTab = 0
+    @State private var showingSavedSongs = false
+    @State private var selectedPlaylistID: UUID?
 
     private var filteredTracks: [Track] {
         let base = library.tracks
@@ -179,13 +181,11 @@ struct ContentView: View {
                 playlistsSection
             }
             .navigationTitle("Library")
-            .navigationDestination(for: UUID.self) { id in
-                PlaylistDetailView(playlistID: id, library: library)
+            .navigationDestination(isPresented: $showingSavedSongs) {
+                SavedSongsView(library: library)
             }
-            .toolbar {
-                Button { showingImporter = true } label: {
-                    Image(systemName: "square.and.arrow.down")
-                }
+            .navigationDestination(item: $selectedPlaylistID) { id in
+                PlaylistDetailView(playlistID: id, library: library)
             }
         }
     }
@@ -195,22 +195,28 @@ struct ContentView: View {
     @ViewBuilder
     private var savedSongsSection: some View {
         Section {
-            NavigationLink {
-                SavedSongsView(library: library)
-            } label: {
+            Button { showingSavedSongs = true } label: {
                 HStack {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(themeManager.current.secondaryAccent.gradient)
                         .frame(width: 50, height: 50)
                         .overlay(Image(systemName: "music.note").foregroundColor(.white))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Saved Songs").font(.headline)
+                        Text("Saved songs").font(.headline)
                         Text("\(library.tracks.count) songs")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    Spacer()
+                    Button { showingImporter = true } label: {
+                        Image(systemName: "icloud.and.arrow.down")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
+                .foregroundStyle(.primary)
             }
+            .buttonStyle(.plain)
         }
     }
 
@@ -224,7 +230,7 @@ struct ContentView: View {
 
             ForEach(library.playlists) { playlist in
                 // Navigate by ID so PlaylistDetailView always reads live data
-                NavigationLink(value: playlist.id) {
+                Button { selectedPlaylistID = playlist.id } label: {
                     HStack {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(themeManager.current.accent.gradient)
@@ -232,7 +238,9 @@ struct ContentView: View {
                             .overlay(Image(systemName: "music.note.list").foregroundColor(.white))
                         Text(playlist.name).font(.headline)
                     }
+                    .foregroundStyle(.primary)
                 }
+                .buttonStyle(.plain)
             }
             .onDelete { indexSet in
                 for index in indexSet {
