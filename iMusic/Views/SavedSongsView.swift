@@ -225,7 +225,18 @@ struct SavedSongsView: View {
                 }
             }
 
-            // Sort overlay
+            // Empty state — inside ZStack so sort sheet renders above it
+            if library.tracks.isEmpty {
+                ContentUnavailableView(
+                    "No saved songs",
+                    systemImage: "music.note",
+                    description: Text("Tap Import Songs to add music from your device")
+                )
+            } else if filteredTracks.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+            }
+
+            // Sort overlay — topmost layer
             if showingSortSheet {
                 Color.black.opacity(0.4)
                     .ignoresSafeArea()
@@ -245,17 +256,6 @@ struct SavedSongsView: View {
                     Image(systemName: "line.3.horizontal.decrease")
                         .fontWeight(.semibold)
                 }
-            }
-        }
-        .overlay {
-            if library.tracks.isEmpty {
-                ContentUnavailableView(
-                    "No saved songs",
-                    systemImage: "music.note",
-                    description: Text("Tap Import Songs to add music from your device")
-                )
-            } else if filteredTracks.isEmpty {
-                ContentUnavailableView.search(text: searchText)
             }
         }
         .overlay(alignment: .bottom) {
