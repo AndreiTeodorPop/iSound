@@ -283,7 +283,11 @@ struct YouTubeSearchView: View {
             results = fetched
             downloadedIDs = Set(fetched.filter { savedTitles.contains($0.title) }.map { $0.id })
         } catch {
+            isSearching = false
+            if error is CancellationError { return }
+            if (error as? URLError)?.code == .cancelled { return }
             showToast(.error(error.localizedDescription))
+            return
         }
         isSearching = false
     }
