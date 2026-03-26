@@ -51,11 +51,13 @@ private struct YouTubeResultRow: View {
     let onPlay: () -> Void
     let onDownloadStarted: () -> Void
     let onDownloaded: (URL) -> Void
+    let onDownloadCancelled: () -> Void
     let onDownloadError: (Error) -> Void
 
     @ObservedObject var library: AudioLibrary
     @State private var pendingFileURL: URL? = nil
     @State private var showingDuplicateAlert = false
+    @State private var downloadTask: Task<Void, Never>? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -96,10 +98,13 @@ private struct YouTubeResultRow: View {
                 switch result {
                 case .success(let savedURL):
                     let fileName = identifiable.url.lastPathComponent
-                    try? library.copyToImportedAudio(from: savedURL, fileName: fileName)
+                    try? library.copyToDownloads(from: identifiable.url, fileName: fileName)
+                    Task { await library.loadExistingTracks() }
                     onDownloaded(savedURL)
                 case .failure(let error):
-                    if (error as? FileSaverPicker.FileSaverError) != .cancelled {
+                    if (error as? FileSaverPicker.FileSaverError) == .cancelled {
+                        onDownloadCancelled()
+                    } else {
                         onDownloadError(error)
                     }
                 }
@@ -112,13 +117,17 @@ private struct YouTubeResultRow: View {
         Button {
             if isDownloaded {
                 showingDuplicateAlert = true
-            } else if !isDownloading {
-                Task { await startDownload() }
+            } else if isDownloading {
+                downloadTask?.cancel()
+                downloadTask = nil
+            } else {
+                downloadTask = Task { await startDownload() }
             }
         } label: {
             ZStack {
                 if isDownloading {
-                    ProgressView().controlSize(.small)
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                        .transition(.scale.combined(with: .opacity))
                 } else if isDownloaded {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                         .transition(.scale.combined(with: .opacity))
@@ -133,7 +142,6 @@ private struct YouTubeResultRow: View {
             .animation(.spring(response: 0.3), value: isDownloaded)
         }
         .buttonStyle(.plain)
-        .disabled(isDownloading)
         .alert("Already Downloaded", isPresented: $showingDuplicateAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -150,7 +158,11 @@ private struct YouTubeResultRow: View {
             )
             pendingFileURL = tempURL
         } catch {
-            onDownloadError(error)
+            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                onDownloadCancelled()
+            } else {
+                onDownloadError(error)
+            }
         }
     }
 
@@ -224,16 +236,18 @@ struct YouTubeSearchView: View {
             onDownloadStarted: {
                 withAnimation { _ = downloadingIDs.insert(result.id) }
             },
-            onDownloaded: { savedURL in
+            onDownloaded: { (savedURL: URL) in
                 withAnimation {
                     downloadingIDs.remove(result.id)
                     _ = downloadedIDs.insert(result.id)
                 }
-                Task { await library.reloadAfterDownload() }
                 showToast(.success("Saved to \"\(savedURL.deletingLastPathComponent().lastPathComponent)\""))
             },
-            onDownloadError: { error in
-                _ = withAnimation { downloadingIDs.remove(result.id) }
+            onDownloadCancelled: {
+                withAnimation { _ = downloadingIDs.remove(result.id) }
+            },
+            onDownloadError: { (error: Error) in
+                withAnimation { _ = downloadingIDs.remove(result.id) }
                 showToast(.error(error.localizedDescription))
             },
             library: library
@@ -312,7 +326,7 @@ struct YouTubeSearchView: View {
             ContentUnavailableView("No results", systemImage: "magnifyingglass")
         } else if results.isEmpty {
             ContentUnavailableView(
-                "Search YouTube",
+                "Search on YouTube",
                 systemImage: "play.rectangle",
                 description: Text("Type a song or artist to get started")
             )

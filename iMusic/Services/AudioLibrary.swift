@@ -11,7 +11,6 @@ final class AudioLibrary: ObservableObject {
     @Published var playlists: [Playlist] = []
 
     private let fileManager = FileManager.default
-    private let importFolderName = "ImportedAudio"
 
     // MARK: - Persistence
 
@@ -27,14 +26,14 @@ final class AudioLibrary: ObservableObject {
 
     // MARK: - Directory
 
-    var importDirectory: URL {
+    var downloadsDirectory: URL {
         let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return docs.appendingPathComponent(importFolderName, isDirectory: true)
+        return docs.appendingPathComponent("Downloads", isDirectory: true)
     }
 
-    private func ensureImportDirectory() throws {
-        if !fileManager.fileExists(atPath: importDirectory.path) {
-            try fileManager.createDirectory(at: importDirectory, withIntermediateDirectories: true)
+    private func ensureDownloadsDirectory() throws {
+        if !fileManager.fileExists(atPath: downloadsDirectory.path) {
+            try fileManager.createDirectory(at: downloadsDirectory, withIntermediateDirectories: true)
         }
     }
 
@@ -64,30 +63,14 @@ final class AudioLibrary: ObservableObject {
         objectWillChange.send()
     }
 
-    /// Deletes a track's file from ImportedAudio/ AND Downloads/,
-    /// removes it from all playlists, and reloads the library.
     func deleteTrack(_ track: Track) async {
-        let fileManager = FileManager.default
-
-        // 1. Delete from ImportedAudio (in-app storage)
         if fileManager.fileExists(atPath: track.url.path) {
             try? fileManager.removeItem(at: track.url)
         }
-
-        // 2. Also delete from system Downloads folder if a copy exists there
-        let downloadsDir = fileManager.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let downloadsURL = downloadsDir.appendingPathComponent(track.url.lastPathComponent)
-        if fileManager.fileExists(atPath: downloadsURL.path) {
-            try? fileManager.removeItem(at: downloadsURL)
-        }
-
-        // 3. Remove from every playlist that contains it
         for index in playlists.indices {
             playlists[index].trackIDs.remove(track.id)
         }
         savePlaylists()
-
-        // 4. Reload so the UI reflects the deletion immediately
         await loadExistingTracks()
     }
 
@@ -116,10 +99,10 @@ final class AudioLibrary: ObservableObject {
 
     func loadExistingTracks() async {
         do {
-            try ensureImportDirectory()
+            try ensureDownloadsDirectory()
 
             let urls = try fileManager.contentsOfDirectory(
-                at: importDirectory,
+                at: downloadsDirectory,
                 includingPropertiesForKeys: [.contentModificationDateKey],
                 options: .skipsHiddenFiles
             )
@@ -127,7 +110,6 @@ final class AudioLibrary: ObservableObject {
             let audioURLs = urls
                 .filter { $0.isFileURL }
                 .sorted { a, b in
-                    // Sort by modification date descending (newest first)
                     let dateA = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                     let dateB = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                     return dateA > dateB
@@ -142,7 +124,6 @@ final class AudioLibrary: ObservableObject {
                 }
                 var indexed: [(Int, Track)] = []
                 for await pair in group { indexed.append(pair) }
-                // Restore sort order after concurrent build
                 return indexed.sorted { $0.0 < $1.0 }.map { $0.1 }
             }
 
@@ -153,7 +134,7 @@ final class AudioLibrary: ObservableObject {
         }
     }
 
-    // MARK: - Import (from file picker — security scoped)
+    // MARK: - Import
 
     @MainActor
     func importTrack(from url: URL) {
@@ -161,17 +142,16 @@ final class AudioLibrary: ObservableObject {
         defer { url.stopAccessingSecurityScopedResource() }
 
         do {
-            try ensureImportDirectory()
-            let destURL = importDirectory.appendingPathComponent(url.lastPathComponent)
+            try ensureDownloadsDirectory()
+            let destURL = downloadsDirectory.appendingPathComponent(url.lastPathComponent)
 
-            // Skip if already in the library
             guard !fileManager.fileExists(atPath: destURL.path) else { return }
 
             if url.standardizedFileURL != destURL.standardizedFileURL {
                 try fileManager.copyItem(at: url, to: destURL)
+                try fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: destURL.path)
             }
 
-            // Reload so the new track appears immediately
             Task { await loadExistingTracks() }
 
         } catch {
@@ -179,24 +159,16 @@ final class AudioLibrary: ObservableObject {
         }
     }
 
-    // MARK: - Import (from download — already in importDirectory)
-
-    /// Call this after StreamService.downloadAudio saves a file to ImportedAudio/.
-    /// Reloads tracks so the new download appears immediately in the library.
-    func reloadAfterDownload() async {
-        await loadExistingTracks()
-    }
-
-    /// Copies a downloaded file into ImportedAudio. Skips silently if already present.
-    func copyToImportedAudio(from sourceURL: URL, fileName: String) throws {
-        try ensureImportDirectory()
-        let destURL = importDirectory.appendingPathComponent(fileName)
+    /// Copies a downloaded file into Downloads. Skips silently if already present.
+    func copyToDownloads(from sourceURL: URL, fileName: String) throws {
+        try ensureDownloadsDirectory()
+        let destURL = downloadsDirectory.appendingPathComponent(fileName)
         guard !fileManager.fileExists(atPath: destURL.path) else { return }
         try fileManager.copyItem(at: sourceURL, to: destURL)
+        try fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: destURL.path)
     }
 
     /// For a YouTube stream track, returns the matching downloaded local file by title.
-    /// Returns the track itself if it is already a local file track.
     func localTrack(matching track: Track) -> Track {
         guard track.isYouTubeTrack else { return track }
         return tracks.first { $0.title == track.title } ?? track

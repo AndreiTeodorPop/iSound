@@ -160,6 +160,7 @@ struct SavedSongsView: View {
 
     var body: some View {
         ZStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 // Header
                 VStack(spacing: 16) {
@@ -220,10 +221,28 @@ struct SavedSongsView: View {
                                 Task { await library.deleteTrack(track) }
                             }
                         )
+                        .id(track.id)
                         Divider().padding(.leading, 16)
                     }
                 }
             }
+            .overlay(alignment: .trailing) {
+                if !filteredTracks.isEmpty {
+                    let available: Set<String> = Set(filteredTracks.map { track in
+                        let ch = track.title.first
+                        return (ch?.isLetter == true) ? String(ch!).uppercased() : "#"
+                    })
+                    AlphabetIndexView(proxy: proxy, availableLetters: available) { letter in
+                        guard letter != "#" else {
+                            return filteredTracks.first { !($0.title.first?.isLetter ?? true) }?.id
+                        }
+                        return filteredTracks.first { $0.title.uppercased().hasPrefix(letter) }?.id
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.trailing, 4)
+                }
+            }
+            } // end ScrollViewReader
 
             // Empty state — inside ZStack so sort sheet renders above it
             if library.tracks.isEmpty {

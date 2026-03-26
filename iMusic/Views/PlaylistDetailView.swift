@@ -9,20 +9,20 @@ struct PlaylistDetailView: View {
     @State private var showingAddSongs = false
     @State private var showingDeleteConfirmation = false
     @State private var showingSortSheet = false
-    @State private var sortOrder: TrackSortOrder = .default
+    @State private var sortOrder: TrackSortOrder = .recentlyAdded
     @State private var searchText = ""
 
     @Environment(\.dismiss) private var dismiss
 
     enum TrackSortOrder: CaseIterable {
-        case `default`, titleAZ, titleZA, artist
+        case recentlyAdded, titleAZ, titleZA, artist
 
         var label: String {
             switch self {
-            case .default: return "Default"
-            case .titleAZ: return "Title (A–Z)"
-            case .titleZA: return "Title (Z–A)"
-            case .artist:  return "Artist"
+            case .recentlyAdded: return "Recently Added"
+            case .titleAZ:       return "Title (A–Z)"
+            case .titleZA:       return "Title (Z–A)"
+            case .artist:        return "Artist"
             }
         }
     }
@@ -45,10 +45,10 @@ struct PlaylistDetailView: View {
 
     private var sortedTracksInPlaylist: [Track] {
         switch sortOrder {
-        case .default: return tracksInPlaylist
-        case .titleAZ: return tracksInPlaylist.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        case .titleZA: return tracksInPlaylist.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending }
-        case .artist:  return tracksInPlaylist.sorted { ($0.artist ?? "").localizedCaseInsensitiveCompare($1.artist ?? "") == .orderedAscending }
+        case .recentlyAdded: return tracksInPlaylist
+        case .titleAZ:       return tracksInPlaylist.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .titleZA:       return tracksInPlaylist.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending }
+        case .artist:        return tracksInPlaylist.sorted { ($0.artist ?? "").localizedCaseInsensitiveCompare($1.artist ?? "") == .orderedAscending }
         }
     }
 
@@ -66,6 +66,7 @@ struct PlaylistDetailView: View {
         Group {
             if let playlist {
                 ZStack {
+                ScrollViewReader { proxy in
                 ScrollView {
 
                     // Info + buttons
@@ -140,11 +141,29 @@ struct PlaylistDetailView: View {
                         LazyVStack(spacing: 0) {
                             ForEach(filteredTracksInPlaylist) { track in
                                 trackRow(for: track, playlist: playlist)
+                                    .id(track.id)
                                 Divider().padding(.leading, 16)
                             }
                         }
                     }
                 }
+                .overlay(alignment: .trailing) {
+                    if !filteredTracksInPlaylist.isEmpty {
+                        let available: Set<String> = Set(filteredTracksInPlaylist.map { track in
+                            let ch = track.title.first
+                            return (ch?.isLetter == true) ? String(ch!).uppercased() : "#"
+                        })
+                        AlphabetIndexView(proxy: proxy, availableLetters: available) { letter in
+                            guard letter != "#" else {
+                                return filteredTracksInPlaylist.first { !($0.title.first?.isLetter ?? true) }?.id
+                            }
+                            return filteredTracksInPlaylist.first { $0.title.uppercased().hasPrefix(letter) }?.id
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.trailing, 4)
+                    }
+                }
+                } // end ScrollViewReader
 
                 // Sort overlay — topmost layer
                 if showingSortSheet {
