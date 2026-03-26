@@ -2,6 +2,10 @@ from flask import Flask, request, jsonify, send_file
 import yt_dlp
 import os
 import tempfile
+import shutil
+
+FFMPEG_LOCATION = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
+FFMPEG_DIR = os.path.dirname(FFMPEG_LOCATION) if FFMPEG_LOCATION else None
 
 app = Flask(__name__)
 
@@ -53,6 +57,7 @@ def download():
         }],
         # Keep the file after post-processing
         "keepvideo": False,
+        **({"ffmpeg_location": FFMPEG_DIR} if FFMPEG_DIR else {}),
     }
 
     try:
