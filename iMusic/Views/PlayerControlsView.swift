@@ -1,5 +1,46 @@
 import SwiftUI
 
+// MARK: - Seek bar with tap-to-seek and drag support
+
+struct SeekBar: View {
+    let progress: Double          // 0…1, driven by the player
+    let onSeek: (Double) -> Void  // called with 0…1 on release
+
+    @State private var isDragging = false
+    @State private var dragProgress: Double = 0
+
+    private var display: Double { isDragging ? dragProgress : progress }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.15))
+                    .frame(height: isDragging ? 6 : 4)
+                Capsule()
+                    .fill(Color.primary)
+                    .frame(width: max(0, geo.size.width * display), height: isDragging ? 6 : 4)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { drag in
+                        isDragging = true
+                        dragProgress = min(max(0, drag.location.x / geo.size.width), 1)
+                    }
+                    .onEnded { drag in
+                        let v = min(max(0, drag.location.x / geo.size.width), 1)
+                        onSeek(v)
+                        isDragging = false
+                    }
+            )
+        }
+        .frame(height: 22)
+        .animation(.easeInOut(duration: 0.12), value: isDragging)
+    }
+}
+
 // MARK: - Shared artwork placeholder used across the app
 
 struct TrackArtworkView: View {
@@ -79,15 +120,10 @@ struct PlayerControlsView: View {
             Text(player.currentTime.mmss)
                 .font(.caption2.monospacedDigit())
             
-            Slider(value: Binding(
-                get: {
-                    guard player.duration > 0 else { return 0 }
-                    return player.currentTime / player.duration
-                },
-                set: { player.seek(to: $0 * player.duration) }
-            ))
-            .controlSize(.mini)
-            .tint(.primary) // Modern replacement for accentColor
+            SeekBar(
+                progress: player.duration > 0 ? player.currentTime / player.duration : 0,
+                onSeek: { player.seek(to: $0 * player.duration) }
+            )
 
             Text(player.duration.mmss)
                 .font(.caption2.monospacedDigit())

@@ -77,11 +77,10 @@ struct NowPlayingView: View {
 
             // MARK: Progress
             VStack(spacing: 8) {
-                Slider(value: Binding(
-                    get: { player.duration > 0 ? player.currentTime / player.duration : 0 },
-                    set: { player.seek(to: $0 * player.duration) }
-                ))
-                .tint(.primary)
+                SeekBar(
+                    progress: player.duration > 0 ? player.currentTime / player.duration : 0,
+                    onSeek: { player.seek(to: $0 * player.duration) }
+                )
 
                 HStack {
                     Text(player.currentTime.mmss).font(.caption.monospacedDigit())
