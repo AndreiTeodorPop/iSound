@@ -17,11 +17,13 @@ struct PlaylistDetailView: View {
     enum TrackSortOrder: CaseIterable {
         case recentlyAdded, titleAZ, titleZA, artist
 
+        static var allCases: [TrackSortOrder] { [.recentlyAdded, .titleAZ, .artist] }
+
         var label: String {
             switch self {
             case .recentlyAdded: return "Recently Added"
-            case .titleAZ:       return "Title (A–Z)"
-            case .titleZA:       return "Title (Z–A)"
+            case .titleAZ:       return "Alphabetically (A–Z)"
+            case .titleZA:       return "Alphabetically (Z–A)"
             case .artist:        return "Artist"
             }
         }
@@ -170,7 +172,18 @@ struct PlaylistDetailView: View {
                     Color.black.opacity(0.4)
                         .ignoresSafeArea()
                         .onTapGesture { withAnimation(.spring()) { showingSortSheet = false } }
-                    SortSheetView(title: "Sort Songs", selection: $sortOrder, isPresented: $showingSortSheet) { $0.label }
+                    SortSheetView(title: "Sort Songs", selection: $sortOrder, isPresented: $showingSortSheet) { option in
+                        if option == .titleAZ {
+                            return sortOrder == .titleAZ ? "Alphabetically (A–Z)" : (sortOrder == .titleZA ? "Alphabetically (Z–A)" : "Alphabetically")
+                        }
+                        return option.label
+                    } onSelect: { option in
+                        if option == .titleAZ {
+                            sortOrder = (sortOrder == .titleAZ) ? .titleZA : .titleAZ
+                        } else {
+                            sortOrder = option
+                        }
+                    }
                         .padding(.horizontal, 24)
                         .transition(.scale(scale: 0.9).combined(with: .opacity))
                 }

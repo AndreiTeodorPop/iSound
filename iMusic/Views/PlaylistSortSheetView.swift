@@ -5,6 +5,7 @@ struct SortSheetView<T: CaseIterable & Hashable>: View where T.AllCases: RandomA
     @Binding var selection: T
     @Binding var isPresented: Bool
     let labelFor: (T) -> String
+    var onSelect: ((T) -> Void)? = nil
     @EnvironmentObject private var themeManager: ThemeManager
 
     var body: some View {
@@ -18,7 +19,11 @@ struct SortSheetView<T: CaseIterable & Hashable>: View where T.AllCases: RandomA
             ForEach(Array(T.allCases), id: \.self) { option in
                 Button {
                     withAnimation(.spring()) {
-                        selection = option
+                        if let onSelect {
+                            onSelect(option)
+                        } else {
+                            selection = option
+                        }
                         isPresented = false
                     }
                 } label: {

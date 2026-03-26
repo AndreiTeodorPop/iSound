@@ -80,11 +80,22 @@ private struct TrackSortSheetView: View {
             ForEach(SavedSongsView.TrackSortOrder.allCases, id: \.self) { option in
                 Button {
                     withAnimation(.spring()) {
-                        sortOrder = option
+                        if option == .titleAZ {
+                            sortOrder = (sortOrder == .titleAZ) ? .titleZA : .titleAZ
+                        } else {
+                            sortOrder = option
+                        }
                         isPresented = false
                     }
                 } label: {
-                    Text(option.label)
+                    let label: String = {
+                        if option == .titleAZ {
+                            if sortOrder == .titleAZ { return "Alphabetically (A–Z)" }
+                            if sortOrder == .titleZA { return "Alphabetically (Z–A)" }
+                        }
+                        return option.label
+                    }()
+                    Text(label)
                         .font(.body).fontWeight(.semibold)
                         .foregroundStyle(themeManager.current.accent)
                         .frame(maxWidth: .infinity)
@@ -131,11 +142,13 @@ struct SavedSongsView: View {
     enum TrackSortOrder: CaseIterable {
         case recentlyAdded, titleAZ, titleZA, artist
 
+        static var allCases: [TrackSortOrder] { [.recentlyAdded, .titleAZ, .artist] }
+
         var label: String {
             switch self {
             case .recentlyAdded: return "Recently added"
-            case .titleAZ:       return "Alphabetically"
-            case .titleZA:       return "Title (Z–A)"
+            case .titleAZ:       return "Alphabetically (A–Z)"
+            case .titleZA:       return "Alphabetically (Z–A)"
             case .artist:        return "Artist"
             }
         }
