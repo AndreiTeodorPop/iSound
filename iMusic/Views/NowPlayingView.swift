@@ -290,7 +290,7 @@ private struct QueueSheet: View {
 }
 // MARK: - Device Picker Sheet
 
-private struct DevicePickerSheet: View {
+struct DevicePickerSheet: View {
     @EnvironmentObject var player: AudioPlayer
     @Environment(\.dismiss) var dismiss
 

@@ -41,6 +41,7 @@ struct SeekBar: View {
     }
 }
 
+
 // MARK: - Shared artwork placeholder used across the app
 
 struct TrackArtworkView: View {
@@ -61,25 +62,43 @@ struct TrackArtworkView: View {
 
 struct PlayerControlsView: View {
     @EnvironmentObject private var player: AudioPlayer
+    var onExpand: () -> Void = {}
+    @State private var showingDevicePicker = false
 
     var body: some View {
         VStack(spacing: 8) {
             // 1. Track Info Row
             HStack(spacing: 12) {
-                albumArtPlaceholder
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(player.currentTrack?.title ?? "Not Playing")
-                        .font(.subheadline).bold()
-                        .lineLimit(1)
-                    Text(player.currentTrack?.artist ?? "Unknown Artist")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                // Tappable area → expand to full player
+                Button(action: onExpand) {
+                    HStack(spacing: 12) {
+                        albumArtPlaceholder
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(player.currentTrack?.title ?? "Not Playing")
+                                .font(.subheadline).bold()
+                                .lineLimit(1)
+                            Text(player.currentTrack?.artist ?? "Unknown Artist")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+                    }
                 }
-                
-                Spacer()
-                
+                .buttonStyle(.plain)
+
+                Button { showingDevicePicker = true } label: {
+                    Image(systemName: "airplayaudio")
+                        .font(.title2)
+                        .foregroundStyle(.primary)
+                        .frame(width: 36, height: 36)
+                }
+                .sheet(isPresented: $showingDevicePicker) {
+                    DevicePickerSheet()
+                }
+
                 playbackButton
             }
 
@@ -87,7 +106,6 @@ struct PlayerControlsView: View {
             progressSlider
         }
         .padding(12)
-        .contentShape(Rectangle()) // Makes the whole bar tappable
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(

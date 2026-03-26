@@ -78,13 +78,10 @@ struct ContentView: View {
             }
 
             if player.currentTrack != nil {
-                PlayerControlsView()
+                PlayerControlsView(onExpand: { player.isExpanded = true })
                     .padding(.horizontal)
                     .padding(.bottom, 55)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .onTapGesture {
-                        player.isExpanded = true
-                    }
                     .fullScreenCover(isPresented: $player.isExpanded) {
                         NowPlayingView(library: library)
                     }
