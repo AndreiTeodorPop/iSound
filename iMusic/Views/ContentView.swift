@@ -255,6 +255,7 @@ struct ContentView: View {
                     }
                     Spacer()
                 }
+                .contentShape(Rectangle())
                 .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
@@ -286,7 +287,9 @@ struct ContentView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        Spacer()
                     }
+                    .contentShape(Rectangle())
                     .foregroundStyle(.primary)
                 }
                 .buttonStyle(.plain)
