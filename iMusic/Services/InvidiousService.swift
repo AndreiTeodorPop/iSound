@@ -74,8 +74,14 @@ struct YouTubeService {
 
         if let http = urlResponse as? HTTPURLResponse, http.statusCode != 200 {
             struct APIError: Decodable { struct Body: Decodable { let message: String }; let error: Body }
-            let msg = (try? JSONDecoder().decode(APIError.self, from: data))?.error.message
+            var msg = (try? JSONDecoder().decode(APIError.self, from: data))?.error.message
                 ?? "YouTube API error (\(http.statusCode))"
+            // Strip HTML tags from the message
+            msg = msg.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            // Provide a friendlier quota message
+            if msg.lowercased().contains("quota") {
+                msg = "YouTube API quota exceeded. Try again tomorrow or use a different API key."
+            }
             throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: msg])
         }
 
