@@ -63,7 +63,6 @@ struct TrackArtworkView: View {
 struct PlayerControlsView: View {
     @EnvironmentObject private var player: AudioPlayer
     var onExpand: () -> Void = {}
-    @State private var showingDevicePicker = false
 
     var body: some View {
         VStack(spacing: 8) {
@@ -89,15 +88,7 @@ struct PlayerControlsView: View {
                 }
                 .buttonStyle(.plain)
 
-                Button { showingDevicePicker = true } label: {
-                    Image(systemName: "airplayaudio")
-                        .font(.title2)
-                        .foregroundStyle(.primary)
-                        .frame(width: 36, height: 36)
-                }
-                .sheet(isPresented: $showingDevicePicker) {
-                    DevicePickerSheet()
-                }
+                AVRoutePickerButton(font: .title2)
 
                 playbackButton
             }
