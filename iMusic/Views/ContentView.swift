@@ -280,7 +280,12 @@ struct ContentView: View {
                             .fill(themeManager.current.accent.gradient)
                             .frame(width: 50, height: 50)
                             .overlay(Image(systemName: "music.note.list").foregroundColor(.white))
-                        Text(playlist.name).font(.headline)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(playlist.name).font(.headline)
+                            Text("\(playlist.trackIDs.count) songs")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .foregroundStyle(.primary)
                 }
