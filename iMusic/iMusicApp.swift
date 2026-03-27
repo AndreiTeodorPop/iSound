@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppIntents
 
 @main
 struct iMusicApp: App {
@@ -22,6 +23,7 @@ struct iMusicApp: App {
                     .tint(themeManager.current.accent)
                     .task { @MainActor in
                         sharedPlayer.configureAudioSession()
+                        iMusicShortcuts.updateAppShortcutParameters()
                     }
 
                 if showSplash {

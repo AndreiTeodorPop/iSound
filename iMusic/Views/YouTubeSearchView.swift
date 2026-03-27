@@ -212,10 +212,7 @@ struct YouTubeSearchView: View {
             .onReceive(IntentBridge.shared.$pendingYouTubeSearch.compactMap { $0 }) { searchQuery in
                 IntentBridge.shared.pendingYouTubeSearch = nil
                 query = searchQuery
-                searchTask?.cancel()
-                searchTask = Task { @MainActor in
-                    await performSearch()
-                }
+                // onChange(of: query) handles the search — no second task needed
             }
         }
     }

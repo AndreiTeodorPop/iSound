@@ -54,6 +54,51 @@ struct PlayPlaylistIntent: AppIntent {
     }
 }
 
+// MARK: - Pause
+
+struct PauseMusicIntent: AppIntent {
+    static var title: LocalizedStringResource = "Pause Music"
+    static var description = IntentDescription("Pause the currently playing song in iMusic")
+    static var openAppWhenRun: Bool = true
+
+    func perform() async throws -> some IntentResult {
+        await MainActor.run {
+            IntentBridge.shared.pendingPlayerAction = .pause
+        }
+        return .result()
+    }
+}
+
+// MARK: - Resume
+
+struct ResumeMusicIntent: AppIntent {
+    static var title: LocalizedStringResource = "Resume Music"
+    static var description = IntentDescription("Resume playing music in iMusic")
+    static var openAppWhenRun: Bool = true
+
+    func perform() async throws -> some IntentResult {
+        await MainActor.run {
+            IntentBridge.shared.pendingPlayerAction = .resume
+        }
+        return .result()
+    }
+}
+
+// MARK: - Skip
+
+struct SkipTrackIntent: AppIntent {
+    static var title: LocalizedStringResource = "Skip Track"
+    static var description = IntentDescription("Skip to the next song in iMusic")
+    static var openAppWhenRun: Bool = true
+
+    func perform() async throws -> some IntentResult {
+        await MainActor.run {
+            IntentBridge.shared.pendingPlayerAction = .skip
+        }
+        return .result()
+    }
+}
+
 // MARK: - Siri Shortcuts
 
 struct iMusicShortcuts: AppShortcutsProvider {
@@ -61,8 +106,8 @@ struct iMusicShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: SearchYouTubeIntent(),
             phrases: [
-                "Search for a song in \(.applicationName)",
                 "Search YouTube in \(.applicationName)",
+                "Search for a song in \(.applicationName)",
                 "Find music in \(.applicationName)"
             ],
             shortTitle: "Search YouTube",
@@ -72,7 +117,7 @@ struct iMusicShortcuts: AppShortcutsProvider {
             intent: PlaySavedSongIntent(),
             phrases: [
                 "Play a song in \(.applicationName)",
-                "Play music from my library in \(.applicationName)"
+                "Play music in \(.applicationName)"
             ],
             shortTitle: "Play Saved Song",
             systemImageName: "music.note"
@@ -85,6 +130,35 @@ struct iMusicShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Play Playlist",
             systemImageName: "music.note.list"
+        )
+        AppShortcut(
+            intent: PauseMusicIntent(),
+            phrases: [
+                "Pause \(.applicationName)",
+                "Pause music in \(.applicationName)"
+            ],
+            shortTitle: "Pause",
+            systemImageName: "pause.fill"
+        )
+        AppShortcut(
+            intent: ResumeMusicIntent(),
+            phrases: [
+                "Resume \(.applicationName)",
+                "Resume music in \(.applicationName)",
+                "Play music in \(.applicationName)"
+            ],
+            shortTitle: "Resume",
+            systemImageName: "play.fill"
+        )
+        AppShortcut(
+            intent: SkipTrackIntent(),
+            phrases: [
+                "Skip in \(.applicationName)",
+                "Next song in \(.applicationName)",
+                "Skip track in \(.applicationName)"
+            ],
+            shortTitle: "Skip Track",
+            systemImageName: "forward.fill"
         )
     }
 }

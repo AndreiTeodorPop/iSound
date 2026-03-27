@@ -18,6 +18,32 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
+def _fetch_info_with_retry(video_id, max_retries=3):
+    opts = {
+        "quiet": True,
+        "format": "bestaudio[ext=m4a]/bestaudio",
+        "retries": 3,
+        "extractor_retries": 3,
+        "sleep_interval": 2,
+        "max_sleep_interval": 5,
+    }
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(
+                    f"https://www.youtube.com/watch?v={video_id}",
+                    download=False
+                )
+        except Exception as e:
+            last_err = e
+            if "429" in str(e) and attempt < max_retries - 1:
+                time.sleep(2 ** attempt)  # exponential backoff: 1s, 2s, 4s
+            else:
+                raise
+    raise last_err
+
+
 def _get_info(video_id):
     now = time.time()
     with _cache_lock:
@@ -25,15 +51,7 @@ def _get_info(video_id):
         if entry and entry["expires"] > now:
             return entry
 
-    opts = {
-        "quiet": True,
-        "format": "bestaudio[ext=m4a]/bestaudio",
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(
-            f"https://www.youtube.com/watch?v={video_id}",
-            download=False
-        )
+    info = _fetch_info_with_retry(video_id)
 
     entry = {
         "url":      info["url"],
@@ -55,7 +73,6 @@ def stream():
 
     try:
         entry = _get_info(video_id)
-        # Return a proxy URL so the iPhone doesn't hit the IP-locked CDN directly
         proxy_url = request.host_url.rstrip("/") + f"/proxy?id={video_id}"
         return jsonify({
             "url":      proxy_url,
@@ -64,7 +81,9 @@ def stream():
             "duration": entry["duration"],
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        status = 429 if "429" in str(e) else 500
+        msg = "YouTube is rate-limiting the server. Please wait a moment and try again." if status == 429 else str(e)
+        return jsonify({"error": msg}), status
 
 
 @app.route("/proxy")

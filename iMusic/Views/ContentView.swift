@@ -88,9 +88,13 @@ struct ContentView: View {
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: player.currentTrack)
-        .onReceive(IntentBridge.shared.$pendingYouTubeSearch.compactMap { $0 }) { query in
+        .onReceive(IntentBridge.shared.$pendingYouTubeSearch.compactMap { $0 }) { pendingQuery in
             selectedTab = 1
-            IntentBridge.shared.pendingYouTubeSearch = query  // view will consume it
+            IntentBridge.shared.pendingYouTubeSearch = nil
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                IntentBridge.shared.pendingYouTubeSearch = pendingQuery
+            }
         }
         .onReceive(IntentBridge.shared.$pendingSavedSongSearch.compactMap { $0 }) { name in
             IntentBridge.shared.pendingSavedSongSearch = nil
@@ -105,6 +109,15 @@ struct ContentView: View {
             if let playlist = library.playlists.first(where: { $0.name.lowercased().contains(q) }) {
                 let tracks = library.tracks.filter { playlist.trackIDs.contains($0.id) }
                 player.playAll(tracks: tracks, playlistName: playlist.name)
+            }
+        }
+        .onReceive(IntentBridge.shared.$pendingPlayerAction.compactMap { $0 }) { action in
+            IntentBridge.shared.pendingPlayerAction = nil
+            switch action {
+            case .pause:    if player.isPlaying  { player.togglePlayPause() }
+            case .resume:   if !player.isPlaying { player.togglePlayPause() }
+            case .skip:     Task { @MainActor in player.playNext() }
+            case .previous: Task { @MainActor in player.playPrevious() }
             }
         }
         .alert("Create playlist", isPresented: $showingPlaylistAlert) {

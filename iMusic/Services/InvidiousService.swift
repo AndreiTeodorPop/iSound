@@ -70,7 +70,14 @@ struct YouTubeService {
             URLQueryItem(name: "videoCategoryId", value: "10"),
             URLQueryItem(name: "key",        value: apiKey),
         ]
-        let (data, _) = try await URLSession.shared.data(from: c.url!)
+        let (data, urlResponse) = try await URLSession.shared.data(from: c.url!)
+
+        if let http = urlResponse as? HTTPURLResponse, http.statusCode != 200 {
+            struct APIError: Decodable { struct Body: Decodable { let message: String }; let error: Body }
+            let msg = (try? JSONDecoder().decode(APIError.self, from: data))?.error.message
+                ?? "YouTube API error (\(http.statusCode))"
+            throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: msg])
+        }
 
         struct SearchResponse: Decodable {
             struct Item: Decodable {
