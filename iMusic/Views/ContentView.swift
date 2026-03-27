@@ -310,6 +310,20 @@ struct ContentView: View {
                     library.deletePlaylist(sortedPlaylists[index])
                 }
             }
+            Button { showingPlaylistAlert = true } label: {
+                HStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.secondary.opacity(0.3))
+                        .frame(width: 50, height: 50)
+                        .overlay(Image(systemName: "plus").foregroundColor(.secondary))
+                    Text("Create playlist")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         } header: {
             HStack {
                 Text("Playlists")
