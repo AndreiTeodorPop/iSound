@@ -8,15 +8,9 @@ private struct SavedTrackRow: View {
     let isCurrent: Bool
     @ObservedObject var library: AudioLibrary
     let onTap: () -> Void
-    let onAddToPlaylist: (Playlist) -> Void
     let onDelete: () -> Void
 
-    private var eligiblePlaylists: [Playlist] {
-        library.playlists.filter { !$0.trackIDs.contains(track.id) }
-    }
-
     @State private var showingOptions = false
-    @State private var showingShareSheet = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -44,20 +38,9 @@ private struct SavedTrackRow: View {
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
-            .confirmationDialog(track.title, isPresented: $showingOptions, titleVisibility: .visible) {
-                if !eligiblePlaylists.isEmpty {
-                    Menu("Add to Playlist") {
-                        ForEach(eligiblePlaylists) { playlist in
-                            Button(playlist.name) { onAddToPlaylist(playlist) }
-                        }
-                    }
-                }
-                Button("Save to Files") { showingShareSheet = true }
+            .confirmationDialog("", isPresented: $showingOptions, titleVisibility: .hidden) {
                 Button("Delete", role: .destructive) { onDelete() }
                 Button("Cancel", role: .cancel) {}
-            }
-            .sheet(isPresented: $showingShareSheet) {
-                ShareSheet(items: [track.url])
             }
         }
         .contentShape(Rectangle())
@@ -230,10 +213,6 @@ struct SavedSongsView: View {
                             isCurrent: isCurrent,
                             library: library,
                             onTap: { player.play(track: track, queue: filteredTracks) },
-                            onAddToPlaylist: { playlist in
-                                library.addTrack(track, to: playlist)
-                                showToast(.success("Added to \"\(playlist.name)\""))
-                            },
                             onDelete: {
                                 if player.currentTrack?.id == track.id { player.stop() }
                                 Task { await library.deleteTrack(track) }

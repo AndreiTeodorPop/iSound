@@ -273,7 +273,7 @@ private struct PlaylistTrackRow: View {
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
-            .confirmationDialog(track.title, isPresented: $showingOptions, titleVisibility: .visible) {
+            .confirmationDialog("", isPresented: $showingOptions, titleVisibility: .hidden) {
                 Button("Remove from Playlist", role: .destructive) { onRemove() }
                 Button("Cancel", role: .cancel) {}
             }

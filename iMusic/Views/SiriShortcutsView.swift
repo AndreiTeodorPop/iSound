@@ -4,22 +4,46 @@ import AppIntents
 struct SiriShortcutsView: View {
     private let shortcuts: [(icon: String, color: Color, title: String, phrase: String)] = [
         (
+            icon: "play.circle",
+            color: .orange,
+            title: "Play on YouTube",
+            phrase: "\"Play a song on YouTube in iMusic\""
+        ),
+        (
             icon: "magnifyingglass",
             color: .red,
             title: "Search YouTube",
-            phrase: "\"Search for [song] in iMusic\""
+            phrase: "\"Search YouTube in iMusic\""
         ),
         (
             icon: "music.note",
             color: .blue,
             title: "Play a Saved Song",
-            phrase: "\"Play [song] in iMusic\""
+            phrase: "\"Play a song in iMusic\""
         ),
         (
             icon: "music.note.list",
             color: .green,
             title: "Play a Playlist",
-            phrase: "\"Play my [playlist] playlist in iMusic\""
+            phrase: "\"Play a playlist in iMusic\""
+        ),
+        (
+            icon: "pause.fill",
+            color: .purple,
+            title: "Pause Music",
+            phrase: "\"Pause iMusic\""
+        ),
+        (
+            icon: "play.fill",
+            color: .indigo,
+            title: "Resume Music",
+            phrase: "\"Resume iMusic\""
+        ),
+        (
+            icon: "forward.fill",
+            color: .teal,
+            title: "Skip Track",
+            phrase: "\"Skip in iMusic\""
         ),
     ]
 
@@ -67,8 +91,9 @@ struct SiriShortcutsView: View {
 
             Section("How to use") {
                 Label("Say \"Hey Siri\" or hold the side button", systemImage: "1.circle.fill")
-                Label("Speak the command with your song or playlist name", systemImage: "2.circle.fill")
-                Label("iMusic opens and starts playing automatically", systemImage: "3.circle.fill")
+                Label("Speak the command shown above", systemImage: "2.circle.fill")
+                Label("For song/playlist commands, Siri will ask for the name", systemImage: "3.circle.fill")
+                Label("iMusic opens and starts playing automatically", systemImage: "4.circle.fill")
             }
             .foregroundStyle(.secondary)
             .font(.subheadline)
