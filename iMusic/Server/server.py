@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, send_file, Response
 import yt_dlp
 import os
+import re
 import tempfile
 import shutil
 import time
@@ -193,12 +194,24 @@ def related():
         with _cache_lock:
             entry = _cache.get(video_id)
 
-        if entry:
-            title = entry.get("title", "")
-            artist = entry.get("artist", "")
-            query = f"{artist} {title}".strip() if artist else title
-        else:
+        if not entry:
             return jsonify({"items": []}), 200
+
+        title = entry.get("title", "")
+        artist = entry.get("artist", "")
+
+        # Clean noisy suffixes from the uploader name (e.g. "EdSheeranVEVO" → "EdSheeran")
+        artist_clean = re.sub(
+            r'(?i)\b(vevo|official|music|records?|tv|channel|entertainment)\b', '', artist
+        ).strip(" -")
+
+        # Search by artist only so we get their other songs, not the same song again.
+        # Fall back to a cleaned-up title if the artist name is too short/empty.
+        if len(artist_clean) > 2:
+            query = artist_clean
+        else:
+            # Strip "Official Video / Lyrics / ft. ..." noise from the title
+            query = re.sub(r'(?i)\s*[\(\[].*?[\)\]]', '', title).strip()
 
         search_opts = {
             "quiet": True,
