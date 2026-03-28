@@ -283,13 +283,25 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         do {
             let suggested = try await StreamService.getRelated(for: videoID)
             let fresh = suggested.filter { !playedYouTubeIDs.contains($0.id) }
-            guard let first = fresh.first else { stop(); return }
+            guard !fresh.isEmpty else { stop(); return }
             let results = fresh.map {
                 YouTubeResult(id: $0.id, title: $0.title, channelTitle: $0.channelTitle, duration: nil)
             }
             youtubeQueue = results
-            youtubeIndex = 0
-            await streamYouTubeResult(results[0])
+            // Try each candidate until one streams successfully
+            for (index, result) in results.enumerated() {
+                youtubeIndex = index
+                do {
+                    let stream = try await StreamService.getStreamURL(for: result.id)
+                    guard let url = URL(string: stream.url) else { continue }
+                    playYouTube(url: url, title: stream.title, artist: stream.artist,
+                                duration: stream.duration, videoID: result.id)
+                    return
+                } catch {
+                    print("Suggested \(result.id) failed, trying next: \(error)")
+                }
+            }
+            stop()
         } catch {
             print("Failed to fetch suggested videos: \(error)")
             stop()

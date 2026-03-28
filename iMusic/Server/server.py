@@ -27,10 +27,10 @@ def _fetch_info_with_retry(video_id, max_retries=3):
         "extractor_retries": 3,
         "sleep_interval": 2,
         "max_sleep_interval": 5,
-        # tv_embedded doesn't require PO tokens and works on headless servers
+        # android client works without PO tokens on headless servers
         "extractor_args": {
             "youtube": {
-                "player_client": ["tv_embedded", "android", "web"]
+                "player_client": ["android", "android_creator", "tv_embedded"]
             }
         },
     }
