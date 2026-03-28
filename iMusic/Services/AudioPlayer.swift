@@ -12,7 +12,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var currentTrack: Track?
     @Published var isExpanded: Bool = false
-    @Published var isShuffled: Bool = false
+    @Published var isShuffled: Bool = UserDefaults.standard.bool(forKey: "shuffleEnabled")
     @Published private(set) var currentPlaylistName: String? = nil
 
     private var player: AVAudioPlayer?
@@ -66,6 +66,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     func toggleShuffle() {
         isShuffled.toggle()
+        UserDefaults.standard.set(isShuffled, forKey: "shuffleEnabled")
         guard !playlistQueue.isEmpty else { return }
         let current = playlistQueue[currentIndex]
         if isShuffled {
@@ -118,7 +119,9 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             object: item,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.playNext() }
+            Task { @MainActor [weak self] in
+                self?.playNext()
+            }
         }
 
         updateNowPlayingInfo()
@@ -198,6 +201,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             isPlaying = true
             startTimer()
             updateNowPlayingInfo()
+            saveLastPlayed()
         } catch {
             print("AudioPlayer error: \(error)")
         }
@@ -438,6 +442,58 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         cc.togglePlayPauseCommand.addTarget { [weak self] _ in self?.togglePlayPause(); return .success }
         cc.nextTrackCommand.addTarget     { [weak self] _ in Task { @MainActor in self?.playNext()     }; return .success }
         cc.previousTrackCommand.addTarget { [weak self] _ in Task { @MainActor in self?.playPrevious() }; return .success }
+    }
+
+    // MARK: - Last Played Persistence
+
+    private enum PersistenceKey {
+        static let trackID    = "lastPlayedTrackID"
+        static let queueIDs   = "lastPlayedQueueIDs"
+        static let playlist   = "lastPlayedPlaylistName"
+    }
+
+    private func saveLastPlayed() {
+        guard let track = currentTrack, !track.isYouTubeTrack else { return }
+        UserDefaults.standard.set(track.id.uuidString, forKey: PersistenceKey.trackID)
+        UserDefaults.standard.set(playlistQueue.map(\.id.uuidString), forKey: PersistenceKey.queueIDs)
+        UserDefaults.standard.set(currentPlaylistName, forKey: PersistenceKey.playlist)
+    }
+
+    /// Restores the last played local track (paused) from the library.
+    /// No-op if a track is already loaded or nothing was saved.
+    func restoreLastPlayed(from library: AudioLibrary) {
+        guard currentTrack == nil,
+              let idString = UserDefaults.standard.string(forKey: PersistenceKey.trackID),
+              let trackID  = UUID(uuidString: idString),
+              let track    = library.tracks.first(where: { $0.id == trackID })
+        else { return }
+
+        let savedIDs = UserDefaults.standard.stringArray(forKey: PersistenceKey.queueIDs) ?? []
+        let queue: [Track] = savedIDs.compactMap { s in
+            guard let id = UUID(uuidString: s) else { return nil }
+            return library.tracks.first(where: { $0.id == id })
+        }
+
+        // Prepare AVAudioPlayer so togglePlayPause works immediately
+        do {
+            let avPlayer = try AVAudioPlayer(contentsOf: track.url)
+            avPlayer.delegate = self
+            avPlayer.prepareToPlay()
+            self.player = avPlayer
+            self.duration = avPlayer.duration
+        } catch {
+            print("restoreLastPlayed: could not prepare player – \(error)")
+            return
+        }
+
+        currentPlaylistName = UserDefaults.standard.string(forKey: PersistenceKey.playlist)
+        originalQueue  = queue.isEmpty ? [track] : queue
+        playlistQueue  = originalQueue
+        currentIndex   = playlistQueue.firstIndex(where: { $0.id == track.id }) ?? 0
+        currentTrack   = track
+        currentTime    = 0
+        isPlaying      = false
+        updateNowPlayingInfo()
     }
 
     deinit {

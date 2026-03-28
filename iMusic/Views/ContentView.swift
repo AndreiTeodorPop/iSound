@@ -88,6 +88,9 @@ struct ContentView: View {
                     }
             }
         }
+        .onChange(of: library.tracks) { _, tracks in
+            if !tracks.isEmpty { player.restoreLastPlayed(from: library) }
+        }
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: player.currentTrack)
         .onReceive(IntentBridge.shared.$pendingYouTubeSearch.compactMap { $0 }) { pendingQuery in
             selectedTab = 1

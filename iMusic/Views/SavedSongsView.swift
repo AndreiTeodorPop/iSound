@@ -137,9 +137,9 @@ struct SavedSongsView: View {
     @State private var searchText = ""
     @State private var showingImporter = false
     @State private var showingSortSheet = false
-    @State private var sortOrder: TrackSortOrder = .recentlyAdded
+    @AppStorage("savedSongsSortOrder") private var sortOrder: TrackSortOrder = .recentlyAdded
 
-    enum TrackSortOrder: CaseIterable {
+    enum TrackSortOrder: String, CaseIterable {
         case recentlyAdded, titleAZ, titleZA, artist
 
         static var allCases: [TrackSortOrder] { [.recentlyAdded, .titleAZ, .artist] }
