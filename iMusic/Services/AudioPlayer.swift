@@ -31,6 +31,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var youtubeQueue: [YouTubeResult] = []
     private var youtubeIndex: Int = 0
     private var isLoadingNextYouTube: Bool = false
+    private var playedYouTubeIDs: Set<String> = []
 
     private var streamPlayer: AVPlayer?
     private var streamTimeObserver: Any?
@@ -50,6 +51,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     func clearYouTubeQueue() {
         youtubeQueue = []
         youtubeIndex = 0
+        playedYouTubeIDs = []
     }
 
     var hasYouTubeQueue: Bool { !youtubeQueue.isEmpty }
@@ -277,10 +279,12 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     private func playSuggested(for videoID: String) async {
+        playedYouTubeIDs.insert(videoID)
         do {
             let suggested = try await StreamService.getRelated(for: videoID)
-            guard suggested.first != nil else { stop(); return }
-            let results = suggested.map {
+            let fresh = suggested.filter { !playedYouTubeIDs.contains($0.id) }
+            guard let first = fresh.first else { stop(); return }
+            let results = fresh.map {
                 YouTubeResult(id: $0.id, title: $0.title, channelTitle: $0.channelTitle, duration: nil)
             }
             youtubeQueue = results

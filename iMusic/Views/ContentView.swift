@@ -174,7 +174,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 25) {
                     homeSection(title: "Recently Added", items: Array(library.tracks.suffix(5))) { track in
                         TrackCard(track: track)
-                            .onTapGesture { player.play(track: track) }
+                            .onTapGesture { player.play(track: track, queue: library.tracks) }
                     }
 
                     homeSection(title: "Your Playlists", items: library.playlists) { playlist in
