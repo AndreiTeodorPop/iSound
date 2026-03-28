@@ -231,7 +231,10 @@ def related():
         results = []
         for v in (search_info.get("entries") or []):
             vid_id = v.get("id")
+            # Skip missing IDs, the current video, channels (UC…), and playlists
             if not vid_id or vid_id == video_id:
+                continue
+            if len(vid_id) != 11 or v.get("_type") in ("channel", "playlist"):
                 continue
             results.append({
                 "id": vid_id,
