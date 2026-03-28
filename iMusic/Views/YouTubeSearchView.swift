@@ -214,6 +214,19 @@ struct YouTubeSearchView: View {
                 query = searchQuery
                 // onChange(of: query) handles the search — no second task needed
             }
+            .onReceive(IntentBridge.shared.$pendingYouTubePlay.compactMap { $0 }) { searchQuery in
+                IntentBridge.shared.pendingYouTubePlay = nil
+                query = searchQuery
+                searchTask?.cancel()
+                searchTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(500))
+                    guard !Task.isCancelled else { return }
+                    await performSearch()
+                    if let first = results.first {
+                        await playResult(first)
+                    }
+                }
+            }
         }
     }
 

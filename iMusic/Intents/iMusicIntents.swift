@@ -18,6 +18,24 @@ struct SearchYouTubeIntent: AppIntent {
     }
 }
 
+// MARK: - Play YouTube (search + auto-play first result)
+
+struct PlayYouTubeIntent: AppIntent {
+    static var title: LocalizedStringResource = "Play a Song on YouTube"
+    static var description = IntentDescription("Search YouTube and immediately play the top result in iMusic")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Song or Artist", description: "What to play on YouTube")
+    var songName: String
+
+    func perform() async throws -> some IntentResult {
+        await MainActor.run {
+            IntentBridge.shared.pendingYouTubePlay = songName
+        }
+        return .result()
+    }
+}
+
 // MARK: - Play Saved Song
 
 struct PlaySavedSongIntent: AppIntent {
@@ -103,6 +121,15 @@ struct SkipTrackIntent: AppIntent {
 
 struct iMusicShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: PlayYouTubeIntent(),
+            phrases: [
+                "Play a song on YouTube in \(.applicationName)",
+                "Play music on YouTube in \(.applicationName)"
+            ],
+            shortTitle: "Play on YouTube",
+            systemImageName: "play.circle"
+        )
         AppShortcut(
             intent: SearchYouTubeIntent(),
             phrases: [

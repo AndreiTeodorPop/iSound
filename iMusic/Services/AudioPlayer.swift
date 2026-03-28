@@ -279,7 +279,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private func playSuggested(for videoID: String) async {
         do {
             let suggested = try await StreamService.getRelated(for: videoID)
-            guard let first = suggested.first else { stop(); return }
+            guard suggested.first != nil else { stop(); return }
             let results = suggested.map {
                 YouTubeResult(id: $0.id, title: $0.title, channelTitle: $0.channelTitle, duration: nil)
             }

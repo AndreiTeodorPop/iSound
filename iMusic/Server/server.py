@@ -188,21 +188,29 @@ def related():
         return jsonify({"error": "missing id"}), 400
 
     try:
-        # Fetch info to get related videos (no format selection needed)
-        opts = {
-            "quiet": True,
-            "skip_download": True,
-            "retries": 3,
-        }
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(
-                f"https://www.youtube.com/watch?v={video_id}",
-                download=False
-            )
+        # Use cached title/artist from the stream call — avoids a second YouTube fetch
+        # which triggers bot-detection. The video must have been streamed first.
+        with _cache_lock:
+            entry = _cache.get(video_id)
 
-        related_list = info.get("related_videos") or []
+        if entry:
+            title = entry.get("title", "")
+            artist = entry.get("artist", "")
+            query = f"{artist} {title}".strip() if artist else title
+        else:
+            return jsonify({"items": []}), 200
+
+        search_opts = {
+            "quiet": True,
+            "extract_flat": True,
+            "skip_download": True,
+            "playlistend": 11,
+        }
+        with yt_dlp.YoutubeDL(search_opts) as ydl:
+            search_info = ydl.extract_info(f"ytsearch11:{query}", download=False)
+
         results = []
-        for v in related_list[:10]:
+        for v in (search_info.get("entries") or []):
             vid_id = v.get("id")
             if not vid_id or vid_id == video_id:
                 continue
@@ -211,32 +219,8 @@ def related():
                 "title": v.get("title", ""),
                 "channelTitle": v.get("uploader", "") or v.get("channel", ""),
             })
-
-        # Fallback: search by title + uploader if no related videos found
-        if not results:
-            title = info.get("title", "")
-            uploader = info.get("uploader", "") or info.get("channel", "")
-            query = f"{uploader} {title}".strip() if uploader else title
-
-            search_opts = {
-                "quiet": True,
-                "extract_flat": True,
-                "skip_download": True,
-                "playlistend": 11,
-            }
-            with yt_dlp.YoutubeDL(search_opts) as ydl:
-                search_info = ydl.extract_info(f"ytsearch11:{query}", download=False)
-                for entry in (search_info.get("entries") or []):
-                    vid_id = entry.get("id")
-                    if not vid_id or vid_id == video_id:
-                        continue
-                    results.append({
-                        "id": vid_id,
-                        "title": entry.get("title", ""),
-                        "channelTitle": entry.get("uploader", "") or entry.get("channel", ""),
-                    })
-                    if len(results) >= 10:
-                        break
+            if len(results) >= 10:
+                break
 
         return jsonify({"items": results})
 
