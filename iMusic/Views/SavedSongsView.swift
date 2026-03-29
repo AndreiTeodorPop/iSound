@@ -223,6 +223,9 @@ struct SavedSongsView: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: player.currentTrack != nil ? 100 : 0)
+            }
             .overlay(alignment: .trailing) {
                 if !filteredTracks.isEmpty {
                     let available: Set<String> = Set(filteredTracks.map { track in

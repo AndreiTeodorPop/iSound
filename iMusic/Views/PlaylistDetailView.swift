@@ -151,6 +151,9 @@ struct PlaylistDetailView: View {
                         }
                     }
                 }
+                .safeAreaInset(edge: .bottom) {
+                    Color.clear.frame(height: player.currentTrack != nil ? 100 : 0)
+                }
                 .overlay(alignment: .trailing) {
                     if !filteredTracksInPlaylist.isEmpty {
                         let available: Set<String> = Set(filteredTracksInPlaylist.map { track in
