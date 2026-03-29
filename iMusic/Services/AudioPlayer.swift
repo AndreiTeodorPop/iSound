@@ -20,7 +20,6 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     private var interruptionObserver: Any?
     private var routeChangeObserver: Any?
-    private var observationTask: Task<Void, Never>?
 
     // Local track queue
     private var originalQueue: [Track] = []
@@ -386,12 +385,19 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     // MARK: - Notifications
 
     private func observeAudioSessionNotifications() {
-        observationTask = Task { @MainActor in
-            let interruptions = NotificationCenter.default.notifications(named: AVAudioSession.interruptionNotification)
-            let routeChanges  = NotificationCenter.default.notifications(named: AVAudioSession.routeChangeNotification)
-            async let i: Void = { for await n in interruptions { await self.handleInterruption(n) } }()
-            async let r: Void = { for await n in routeChanges  { await self.handleRouteChange(n)  } }()
-            _ = await [i, r]
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] n in
+            MainActor.assumeIsolated { self?.handleInterruption(n) }
+        }
+        routeChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] n in
+            MainActor.assumeIsolated { self?.handleRouteChange(n) }
         }
     }
 
@@ -401,7 +407,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
         switch type {
         case .began:
-            if isPlaying { togglePlayPause() }
+            pauseForInterruption()
         case .ended:
             let opts = AVAudioSession.InterruptionOptions(rawValue: (info[AVAudioSessionInterruptionOptionKey] as? UInt) ?? 0)
             if opts.contains(.shouldResume), !isPlaying { togglePlayPause() }
@@ -409,11 +415,20 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
 
+    /// Pauses without toggling — safe to call when the system may have already paused AVAudioPlayer.
+    private func pauseForInterruption() {
+        streamPlayer?.pause()
+        player?.pause()
+        isPlaying = false
+        stopTimer()
+        updateNowPlayingInfo()
+    }
+
     private func handleRouteChange(_ notification: Notification) {
         guard let info = notification.userInfo,
               let v = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: v) else { return }
-        if reason == .oldDeviceUnavailable, isPlaying { togglePlayPause() }
+        if reason == .oldDeviceUnavailable, isPlaying { pauseForInterruption() }
     }
 
     // MARK: - Now Playing / Remote Commands
@@ -499,6 +514,5 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     deinit {
         if let o = interruptionObserver { NotificationCenter.default.removeObserver(o) }
         if let o = routeChangeObserver  { NotificationCenter.default.removeObserver(o) }
-        observationTask?.cancel()
     }
 }

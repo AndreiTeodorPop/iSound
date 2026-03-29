@@ -14,7 +14,7 @@ struct PlaylistDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    enum TrackSortOrder: CaseIterable {
+    enum TrackSortOrder: String, CaseIterable {
         case recentlyAdded, titleAZ, titleZA, artist
 
         static var allCases: [TrackSortOrder] { [.recentlyAdded, .titleAZ, .artist] }
@@ -28,6 +28,8 @@ struct PlaylistDetailView: View {
             }
         }
     }
+
+    private var sortKey: String { "playlistSortOrder_\(playlistID)" }
 
     // MARK: - Live lookup
 
@@ -199,6 +201,15 @@ struct PlaylistDetailView: View {
                                 .fontWeight(.semibold)
                         }
                     }
+                }
+                .onAppear {
+                    if let raw = UserDefaults.standard.string(forKey: sortKey),
+                       let saved = TrackSortOrder(rawValue: raw) {
+                        sortOrder = saved
+                    }
+                }
+                .onChange(of: sortOrder) { _, newValue in
+                    UserDefaults.standard.set(newValue.rawValue, forKey: sortKey)
                 }
                 .confirmationDialog(
                     "Delete \"\(playlist.name)\"?",
