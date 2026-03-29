@@ -2,6 +2,33 @@ import SwiftUI
 import UniformTypeIdentifiers
 import Combine
 
+// MARK: - Tab Background Decoration
+
+struct TabBackgroundDecoration: View {
+    @EnvironmentObject private var themeManager: ThemeManager
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(themeManager.current.accent.opacity(0.22))
+                .frame(width: 340)
+                .blur(radius: 90)
+                .offset(x: 140, y: -80)
+            Circle()
+                .fill(themeManager.current.secondaryAccent.opacity(0.18))
+                .frame(width: 270)
+                .blur(radius: 75)
+                .offset(x: -100, y: 280)
+            Circle()
+                .fill(themeManager.current.accent.opacity(0.12))
+                .frame(width: 220)
+                .blur(radius: 65)
+                .offset(x: 60, y: 560)
+        }
+        .ignoresSafeArea()
+    }
+}
+
 // MARK: - Track Card (home screen horizontal scroll)
 
 struct TrackCard: View {
@@ -189,6 +216,7 @@ struct ContentView: View {
                 }
                 .padding()
             }
+            .background { TabBackgroundDecoration() }
             .navigationTitle("Home")
             // Destination keyed on UUID
             .navigationDestination(for: UUID.self) { id in
@@ -240,13 +268,13 @@ struct ContentView: View {
                 .padding(.horizontal)
                 .padding(.top, 8)
                 .padding(.bottom, 8)
-                .background(Color(.systemGroupedBackground))
 
                 List {
                     savedSongsSection
                     playlistsSection
                 }
                 .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
             }
             .overlay {
                 if showingSortSheet {
@@ -259,7 +287,7 @@ struct ContentView: View {
                 }
             }
             .animation(.spring(), value: showingSortSheet)
-            .background(Color(.systemGroupedBackground))
+            .background { TabBackgroundDecoration() }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showingSavedSongs) {
                 SavedSongsView(library: library)

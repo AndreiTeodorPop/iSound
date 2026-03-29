@@ -183,6 +183,8 @@ struct YouTubeSearchView: View {
                 resultRow(result)
                     .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
             }
+            .scrollContentBackground(.hidden)
+            .background { TabBackgroundDecoration() }
             .navigationTitle("Search")
             .searchable(text: $query, prompt: "Search songs, artists…")
             .onChange(of: query) { _, newValue in
