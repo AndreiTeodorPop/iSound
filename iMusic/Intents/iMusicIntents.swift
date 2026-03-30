@@ -7,7 +7,7 @@ struct PlayYouTubeIntent: AppIntent {
     static var description = IntentDescription("Search YouTube and immediately play the top result in iMusic")
     static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Song or Artist", description: "What to play on YouTube")
+    @Parameter(title: "Song or Artist", description: "What to play on YouTube", requestValueDialog: "Which track would you like to play from YouTube?")
     var songName: String
 
     func perform() async throws -> some IntentResult {
@@ -25,12 +25,30 @@ struct PlaySavedSongIntent: AppIntent {
     static var description = IntentDescription("Play a song from your iMusic library")
     static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Song Name", description: "Name of the saved song to play")
+    @Parameter(title: "Song Name", description: "Name of the saved song to play", requestValueDialog: "Which song would you like to play?")
     var songName: String
 
     func perform() async throws -> some IntentResult {
         await MainActor.run {
             IntentBridge.shared.pendingSavedSongSearch = songName
+        }
+        return .result()
+    }
+}
+
+// MARK: - Play Playlist
+
+struct PlayPlaylistIntent: AppIntent {
+    static var title: LocalizedStringResource = "Play a Playlist"
+    static var description = IntentDescription("Shuffle and play a playlist from your iMusic library")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Playlist Name", description: "Name of the playlist to play", requestValueDialog: "Which playlist would you like to play?")
+    var playlistName: String
+
+    func perform() async throws -> some IntentResult {
+        await MainActor.run {
+            IntentBridge.shared.pendingPlaylistName = playlistName
         }
         return .result()
     }
@@ -117,6 +135,15 @@ struct iMusicShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Play Saved Song",
             systemImageName: "music.note"
+        )
+        AppShortcut(
+            intent: PlayPlaylistIntent(),
+            phrases: [
+                "Play playlist in \(.applicationName)",
+                "Play a playlist in \(.applicationName)"
+            ],
+            shortTitle: "Play Playlist",
+            systemImageName: "music.note.list"
         )
         AppShortcut(
             intent: PauseMusicIntent(),

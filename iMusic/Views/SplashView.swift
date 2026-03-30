@@ -6,7 +6,7 @@ struct SplashView: View {
     @State private var logoScale: CGFloat = 0.3
     @State private var logoOpacity: Double = 0
     @State private var textOpacity: Double = 0
-    @State private var textOffset: CGFloat = 20
+    @State private var textOffset: CGFloat = 0
     @State private var hatRotation: Double = -15
     @State private var waveOffset: CGFloat = 0
 
@@ -86,7 +86,6 @@ struct SplashView: View {
             }
             withAnimation(.easeOut(duration: 1.2).delay(0.5)) {
                 textOpacity = 1.0
-                textOffset = 0
             }
             withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) {
                 waveOffset = 60

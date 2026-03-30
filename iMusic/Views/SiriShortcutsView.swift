@@ -16,6 +16,12 @@ struct SiriShortcutsView: View {
             phrase: "\"Play saved song in iMusic\""
         ),
         (
+            icon: "music.note.list",
+            color: .green,
+            title: "Play a Playlist",
+            phrase: "\"Play playlist in iMusic\""
+        ),
+        (
             icon: "pause.fill",
             color: .purple,
             title: "Pause Music",

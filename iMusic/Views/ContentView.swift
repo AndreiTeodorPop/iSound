@@ -161,7 +161,7 @@ struct ContentView: View {
             }
         }
         .onReceive(IntentBridge.shared.$pendingPlaylistName.compactMap { $0 }) { name in
-            guard !library.playlists.isEmpty else { return } // onChange(of: library.tracks) will handle it
+            guard !library.playlists.isEmpty, !library.tracks.isEmpty else { return } // onChange(of: library.tracks) will handle it
             IntentBridge.shared.pendingPlaylistName = nil
             let q = name.lowercased()
             if let playlist = library.playlists.first(where: { $0.name.lowercased().contains(q) }) {
@@ -177,7 +177,7 @@ struct ContentView: View {
             if let action = IntentBridge.shared.pendingPlayerAction {
                 handlePlayerAction(action)
             }
-            if let name = IntentBridge.shared.pendingPlaylistName, !library.playlists.isEmpty {
+            if let name = IntentBridge.shared.pendingPlaylistName, !library.playlists.isEmpty, !library.tracks.isEmpty {
                 IntentBridge.shared.pendingPlaylistName = nil
                 let q = name.lowercased()
                 if let playlist = library.playlists.first(where: { $0.name.lowercased().contains(q) }) {
