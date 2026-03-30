@@ -52,6 +52,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     func clearYouTubeQueue() {
         youtubeQueue = []
         youtubeIndex = 0
+        youtubeHistory = []
         playedYouTubeIDs = []
     }
 

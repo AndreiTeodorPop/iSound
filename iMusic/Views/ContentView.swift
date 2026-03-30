@@ -116,7 +116,24 @@ struct ContentView: View {
             }
         }
         .onChange(of: library.tracks) { _, tracks in
-            if !tracks.isEmpty { player.restoreLastPlayed(from: library) }
+            guard !tracks.isEmpty else { return }
+            player.restoreLastPlayed(from: library)
+            // Process intents that fired before the library finished loading
+            if let name = IntentBridge.shared.pendingSavedSongSearch {
+                IntentBridge.shared.pendingSavedSongSearch = nil
+                let q = name.lowercased()
+                if let track = tracks.first(where: { $0.title.lowercased().contains(q) || ($0.artist?.lowercased().contains(q) == true) }) {
+                    player.play(track: track, queue: tracks)
+                }
+            }
+            if let name = IntentBridge.shared.pendingPlaylistName {
+                IntentBridge.shared.pendingPlaylistName = nil
+                let q = name.lowercased()
+                if let playlist = library.playlists.first(where: { $0.name.lowercased().contains(q) }) {
+                    let playlistTracks = tracks.filter { playlist.trackIDs.contains($0.id) }.shuffled()
+                    player.playAll(tracks: playlistTracks, playlistName: playlist.name)
+                }
+            }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: player.currentTrack)
         .onReceive(IntentBridge.shared.$pendingYouTubeSearch.compactMap { $0 }) { pendingQuery in
@@ -136,6 +153,7 @@ struct ContentView: View {
             }
         }
         .onReceive(IntentBridge.shared.$pendingSavedSongSearch.compactMap { $0 }) { name in
+            guard !library.tracks.isEmpty else { return } // onChange(of: library.tracks) will handle it
             IntentBridge.shared.pendingSavedSongSearch = nil
             let q = name.lowercased()
             if let track = library.tracks.first(where: { $0.title.lowercased().contains(q) || ($0.artist?.lowercased().contains(q) == true) }) {
@@ -143,20 +161,36 @@ struct ContentView: View {
             }
         }
         .onReceive(IntentBridge.shared.$pendingPlaylistName.compactMap { $0 }) { name in
+            guard !library.playlists.isEmpty else { return } // onChange(of: library.tracks) will handle it
             IntentBridge.shared.pendingPlaylistName = nil
             let q = name.lowercased()
             if let playlist = library.playlists.first(where: { $0.name.lowercased().contains(q) }) {
-                let tracks = library.tracks.filter { playlist.trackIDs.contains($0.id) }
+                let tracks = library.tracks.filter { playlist.trackIDs.contains($0.id) }.shuffled()
                 player.playAll(tracks: tracks, playlistName: playlist.name)
             }
         }
         .onReceive(IntentBridge.shared.$pendingPlayerAction.compactMap { $0 }) { action in
-            IntentBridge.shared.pendingPlayerAction = nil
-            switch action {
-            case .pause:    if player.isPlaying  { player.togglePlayPause() }
-            case .resume:   if !player.isPlaying { player.togglePlayPause() }
-            case .skip:     Task { @MainActor in player.playNext() }
-            case .previous: Task { @MainActor in player.playPrevious() }
+            handlePlayerAction(action)
+        }
+        .onAppear {
+            // Catch intents that fired before the view subscribed (cold launch via Siri)
+            if let action = IntentBridge.shared.pendingPlayerAction {
+                handlePlayerAction(action)
+            }
+            if let name = IntentBridge.shared.pendingPlaylistName, !library.playlists.isEmpty {
+                IntentBridge.shared.pendingPlaylistName = nil
+                let q = name.lowercased()
+                if let playlist = library.playlists.first(where: { $0.name.lowercased().contains(q) }) {
+                    let tracks = library.tracks.filter { playlist.trackIDs.contains($0.id) }.shuffled()
+                    player.playAll(tracks: tracks, playlistName: playlist.name)
+                }
+            }
+            if let name = IntentBridge.shared.pendingSavedSongSearch, !library.tracks.isEmpty {
+                IntentBridge.shared.pendingSavedSongSearch = nil
+                let q = name.lowercased()
+                if let track = library.tracks.first(where: { $0.title.lowercased().contains(q) || ($0.artist?.lowercased().contains(q) == true) }) {
+                    player.play(track: track, queue: library.tracks)
+                }
             }
         }
         .alert("Create playlist", isPresented: $showingPlaylistAlert) {
@@ -428,6 +462,16 @@ struct ContentView: View {
             Text(playlist.name).font(.subheadline).bold().lineLimit(1).foregroundStyle(.primary)
         }
         .frame(width: 140)
+    }
+
+    private func handlePlayerAction(_ action: PendingPlayerAction) {
+        IntentBridge.shared.pendingPlayerAction = nil
+        switch action {
+        case .pause:    if player.isPlaying  { player.togglePlayPause() }
+        case .resume:   if !player.isPlaying { player.togglePlayPause() }
+        case .skip:     Task { @MainActor in player.playNext() }
+        case .previous: Task { @MainActor in player.playPrevious() }
+        }
     }
 
     private func trackRow(_ track: Track) -> some View {

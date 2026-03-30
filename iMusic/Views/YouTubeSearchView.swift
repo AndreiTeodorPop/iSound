@@ -199,20 +199,12 @@ struct YouTubeSearchView: View {
                     await performSearch()
                     if autoPlayNextSearch {
                         autoPlayNextSearch = false
-                        let savedResults = results
-                        let firstResult = savedResults.first
-                        // Set queue now, before results is cleared
-                        if let first = firstResult,
-                           let index = savedResults.firstIndex(where: { $0.id == first.id }) {
-                            player.setYouTubeQueue(savedResults, startingAt: index)
+                        if let first = results.first,
+                           let index = results.firstIndex(where: { $0.id == first.id }) {
+                            player.setYouTubeQueue(results, startingAt: index)
                         }
-                        // Clear search bar immediately so it doesn't reappear on re-renders
-                        query = ""
-                        results = []
-                        // Run in a new Task — setting query="" cancels searchTask, which would
-                        // throw CancellationError inside playResult if called directly here
-                        if let first = firstResult {
-                            Task { await self.playResult(first) }
+                        if let first = results.first {
+                            await playResult(first)
                         }
                     }
                 }

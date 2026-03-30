@@ -36,101 +36,6 @@ struct PlaySavedSongIntent: AppIntent {
     }
 }
 
-// MARK: - Play Playlist
-
-struct PlayPlaylistIntent: AppIntent {
-    static var title: LocalizedStringResource = "Play a Playlist"
-    static var description = IntentDescription("Play one of your iMusic playlists")
-    static var openAppWhenRun: Bool = true
-
-    @Parameter(title: "Playlist Name", description: "Name of the playlist to play")
-    var playlistName: String
-
-    func perform() async throws -> some IntentResult {
-        await MainActor.run {
-            IntentBridge.shared.pendingPlaylistName = playlistName
-        }
-        return .result()
-    }
-}
-
-// MARK: - Play Artist
-
-struct PlayArtistIntent: AppIntent {
-    static var title: LocalizedStringResource = "Play an Artist"
-    static var description = IntentDescription("Search and play music by an artist in iMusic")
-    static var openAppWhenRun: Bool = true
-
-    @Parameter(title: "Artist Name", description: "Name of the artist to play")
-    var artistName: String
-
-    func perform() async throws -> some IntentResult {
-        await MainActor.run {
-            IntentBridge.shared.pendingArtistSearch = artistName
-        }
-        return .result()
-    }
-}
-
-// MARK: - Previous Track
-
-struct PreviousTrackIntent: AppIntent {
-    static var title: LocalizedStringResource = "Previous Track"
-    static var description = IntentDescription("Go back to the previous song in iMusic")
-    static var openAppWhenRun: Bool = true
-
-    func perform() async throws -> some IntentResult {
-        await MainActor.run {
-            IntentBridge.shared.pendingPlayerAction = .previous
-        }
-        return .result()
-    }
-}
-
-// MARK: - Pause
-
-struct PauseMusicIntent: AppIntent {
-    static var title: LocalizedStringResource = "Pause Music"
-    static var description = IntentDescription("Pause the currently playing song in iMusic")
-    static var openAppWhenRun: Bool = true
-
-    func perform() async throws -> some IntentResult {
-        await MainActor.run {
-            IntentBridge.shared.pendingPlayerAction = .pause
-        }
-        return .result()
-    }
-}
-
-// MARK: - Resume
-
-struct ResumeMusicIntent: AppIntent {
-    static var title: LocalizedStringResource = "Resume Music"
-    static var description = IntentDescription("Resume playing music in iMusic")
-    static var openAppWhenRun: Bool = true
-
-    func perform() async throws -> some IntentResult {
-        await MainActor.run {
-            IntentBridge.shared.pendingPlayerAction = .resume
-        }
-        return .result()
-    }
-}
-
-// MARK: - Skip
-
-struct SkipTrackIntent: AppIntent {
-    static var title: LocalizedStringResource = "Skip Track"
-    static var description = IntentDescription("Skip to the next song in iMusic")
-    static var openAppWhenRun: Bool = true
-
-    func perform() async throws -> some IntentResult {
-        await MainActor.run {
-            IntentBridge.shared.pendingPlayerAction = .skip
-        }
-        return .result()
-    }
-}
 
 // MARK: - Siri Shortcuts
 
@@ -148,67 +53,11 @@ struct iMusicShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: PlaySavedSongIntent(),
             phrases: [
-                "Play a song in \(.applicationName)",
-                "Play music in \(.applicationName)"
+                "Play saved song in \(.applicationName)",
+                "Play a saved song in \(.applicationName)"
             ],
             shortTitle: "Play Saved Song",
             systemImageName: "music.note"
-        )
-        AppShortcut(
-            intent: PlayPlaylistIntent(),
-            phrases: [
-                "Play a playlist in \(.applicationName)",
-                "Play my playlist in \(.applicationName)"
-            ],
-            shortTitle: "Play Playlist",
-            systemImageName: "music.note.list"
-        )
-        AppShortcut(
-            intent: PlayArtistIntent(),
-            phrases: [
-                "Play an artist in \(.applicationName)",
-                "Play music by an artist in \(.applicationName)"
-            ],
-            shortTitle: "Play Artist",
-            systemImageName: "person.fill"
-        )
-        AppShortcut(
-            intent: PreviousTrackIntent(),
-            phrases: [
-                "Previous song in \(.applicationName)",
-                "Go back in \(.applicationName)"
-            ],
-            shortTitle: "Previous Track",
-            systemImageName: "backward.fill"
-        )
-        AppShortcut(
-            intent: PauseMusicIntent(),
-            phrases: [
-                "Pause \(.applicationName)",
-                "Pause music in \(.applicationName)"
-            ],
-            shortTitle: "Pause",
-            systemImageName: "pause.fill"
-        )
-        AppShortcut(
-            intent: ResumeMusicIntent(),
-            phrases: [
-                "Resume \(.applicationName)",
-                "Resume music in \(.applicationName)",
-                "Play music in \(.applicationName)"
-            ],
-            shortTitle: "Resume",
-            systemImageName: "play.fill"
-        )
-        AppShortcut(
-            intent: SkipTrackIntent(),
-            phrases: [
-                "Skip in \(.applicationName)",
-                "Next song in \(.applicationName)",
-                "Skip track in \(.applicationName)"
-            ],
-            shortTitle: "Skip Track",
-            systemImageName: "forward.fill"
         )
     }
 }
