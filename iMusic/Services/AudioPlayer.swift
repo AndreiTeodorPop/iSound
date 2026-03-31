@@ -92,6 +92,36 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         return Array(playlistQueue[(currentIndex + 1)...])
     }
 
+    // MARK: - Queue Editing
+
+    func moveUpcomingTrack(from source: IndexSet, to destination: Int) {
+        let offset = currentIndex + 1
+        let adjustedSource = IndexSet(source.map { $0 + offset })
+        let adjustedDest = min(destination + offset, playlistQueue.count)
+        playlistQueue.move(fromOffsets: adjustedSource, toOffset: adjustedDest)
+        if !isShuffled { originalQueue = playlistQueue }
+    }
+
+    func removeUpcomingTrack(at offsets: IndexSet) {
+        let offset = currentIndex + 1
+        let adjustedOffsets = IndexSet(offsets.map { $0 + offset })
+        playlistQueue.remove(atOffsets: adjustedOffsets)
+        if !isShuffled { originalQueue = playlistQueue }
+    }
+
+    func moveUpcomingYouTubeTrack(from source: IndexSet, to destination: Int) {
+        let offset = youtubeIndex + 1
+        let adjustedSource = IndexSet(source.map { $0 + offset })
+        let adjustedDest = min(destination + offset, youtubeQueue.count)
+        youtubeQueue.move(fromOffsets: adjustedSource, toOffset: adjustedDest)
+    }
+
+    func removeUpcomingYouTubeTrack(at offsets: IndexSet) {
+        let offset = youtubeIndex + 1
+        let adjustedOffsets = IndexSet(offsets.map { $0 + offset })
+        youtubeQueue.remove(atOffsets: adjustedOffsets)
+    }
+
     // MARK: - YouTube streaming
 
     func playYouTube(url: URL, title: String, artist: String, duration: TimeInterval, videoID: String) {

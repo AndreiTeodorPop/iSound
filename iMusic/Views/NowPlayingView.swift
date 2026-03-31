@@ -253,24 +253,26 @@ private struct QueueSheet: View {
                 } else {
                     List {
                         Section("Up Next") {
-                            ForEach(Array(queueItems.enumerated()), id: \.element.id) { index, item in
-                                HStack(spacing: 12) {
-                                    Text("\(index + 1)")
-                                        .font(.caption.monospacedDigit())
+                            ForEach(queueItems) { item in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title)
+                                        .font(.headline)
+                                        .lineLimit(1)
+                                    Text(item.artist)
+                                        .font(.caption)
                                         .foregroundStyle(.secondary)
-                                        .frame(width: 24)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(item.title)
-                                            .font(.headline)
-                                            .lineLimit(1)
-                                        Text(item.artist)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
+                                }
+                            }
+                            .onMove { source, destination in
+                                if player.hasYouTubeQueue {
+                                    player.moveUpcomingYouTubeTrack(from: source, to: destination)
+                                } else {
+                                    player.moveUpcomingTrack(from: source, to: destination)
                                 }
                             }
                         }
                     }
+                    .environment(\.editMode, .constant(.active))
                 }
             }
             .navigationTitle("Queue")
