@@ -6,20 +6,20 @@ struct SiriShortcutsView: View {
         (
             icon: "play.circle",
             color: .orange,
-            title: "Play a Song on YouTube",
-            phrase: "\"Play a Song on YouTube in iMusic\""
+            title: "Play a song from YouTube",
+            phrase: "\"Play a song from YouTube in iMusic\""
         ),
         (
             icon: "music.note",
             color: .blue,
-            title: "Play a Saved Song",
-            phrase: "\"Play saved song in iMusic\""
+            title: "Play a saved song",
+            phrase: "\"Play a saved song in iMusic\""
         ),
         (
             icon: "music.note.list",
             color: .green,
-            title: "Play a Playlist",
-            phrase: "\"Play playlist in iMusic\""
+            title: "Play a playlist",
+            phrase: "\"Play a playlist in iMusic\""
         ),
         (
             icon: "pause.fill",

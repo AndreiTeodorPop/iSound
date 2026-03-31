@@ -8,7 +8,7 @@ private struct IntentError: LocalizedError {
 // MARK: - Play YouTube (search + auto-play first result)
 
 struct PlayYouTubeIntent: AppIntent {
-    static var title: LocalizedStringResource = "Play a Song on YouTube"
+    static var title: LocalizedStringResource = "Play a song from YouTube"
     static var description = IntentDescription("Search YouTube and immediately play the top result in iMusic")
     static var openAppWhenRun: Bool = false
 
@@ -39,7 +39,7 @@ struct PlayYouTubeIntent: AppIntent {
 // MARK: - Play Saved Song
 
 struct PlaySavedSongIntent: AppIntent {
-    static var title: LocalizedStringResource = "Play a Saved Song"
+    static var title: LocalizedStringResource = "Play a saved song"
     static var description = IntentDescription("Play a song from your iMusic library")
     static var openAppWhenRun: Bool = false
 
@@ -67,7 +67,7 @@ struct PlaySavedSongIntent: AppIntent {
 // MARK: - Play Playlist
 
 struct PlayPlaylistIntent: AppIntent {
-    static var title: LocalizedStringResource = "Play a Playlist"
+    static var title: LocalizedStringResource = "Play a playlist"
     static var description = IntentDescription("Shuffle and play a playlist from your iMusic library")
     static var openAppWhenRun: Bool = false
 
@@ -166,8 +166,8 @@ struct iMusicShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: PlayYouTubeIntent(),
             phrases: [
-                "Play a song on YouTube in \(.applicationName)",
-                "Play music on YouTube in \(.applicationName)"
+                "Play a song from YouTube in \(.applicationName)",
+                "Play music from YouTube in \(.applicationName)"
             ],
             shortTitle: "Play on YouTube",
             systemImageName: "play.circle"
@@ -178,7 +178,7 @@ struct iMusicShortcuts: AppShortcutsProvider {
                 "Play saved song in \(.applicationName)",
                 "Play a saved song in \(.applicationName)"
             ],
-            shortTitle: "Play Saved Song",
+            shortTitle: "Play saved song",
             systemImageName: "music.note"
         )
         AppShortcut(
@@ -187,7 +187,7 @@ struct iMusicShortcuts: AppShortcutsProvider {
                 "Play playlist in \(.applicationName)",
                 "Play a playlist in \(.applicationName)"
             ],
-            shortTitle: "Play Playlist",
+            shortTitle: "Play playlist",
             systemImageName: "music.note.list"
         )
         AppShortcut(
