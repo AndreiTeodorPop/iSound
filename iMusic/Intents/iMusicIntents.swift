@@ -1,20 +1,34 @@
 import AppIntents
+import AVFoundation
 
 // MARK: - Play YouTube (search + auto-play first result)
 
 struct PlayYouTubeIntent: AppIntent {
     static var title: LocalizedStringResource = "Play a Song on YouTube"
     static var description = IntentDescription("Search YouTube and immediately play the top result in iMusic")
-    static var openAppWhenRun: Bool = true
+    static var openAppWhenRun: Bool = false
 
     @Parameter(title: "Song or Artist", description: "What to play on YouTube", requestValueDialog: "Which track would you like to play from YouTube?")
     var songName: String
 
-    func perform() async throws -> some IntentResult {
-        await MainActor.run {
-            IntentBridge.shared.pendingYouTubePlay = songName
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let results = try await YouTubeService.search(songName)
+        guard let first = results.first else {
+            return .result(dialog: "I couldn't find \"\(songName)\" on YouTube")
         }
-        return .result()
+        let stream = try await StreamService.getStreamURL(for: first.id)
+        guard let url = URL(string: stream.url) else {
+            return .result(dialog: "Couldn't get a stream for \"\(songName)\"")
+        }
+        await MainActor.run {
+            AudioPlayer.shared.configureAudioSession()
+            AudioPlayer.shared.setYouTubeQueue(results, startingAt: 0)
+            AudioPlayer.shared.playYouTube(
+                url: url, title: stream.title, artist: stream.artist,
+                duration: stream.duration, videoID: first.id
+            )
+        }
+        return .result(dialog: "Now playing \(stream.title) from YouTube")
     }
 }
 
@@ -23,16 +37,26 @@ struct PlayYouTubeIntent: AppIntent {
 struct PlaySavedSongIntent: AppIntent {
     static var title: LocalizedStringResource = "Play a Saved Song"
     static var description = IntentDescription("Play a song from your iMusic library")
-    static var openAppWhenRun: Bool = true
+    static var openAppWhenRun: Bool = false
 
     @Parameter(title: "Song Name", description: "Name of the saved song to play", requestValueDialog: "Which song would you like to play?")
     var songName: String
 
-    func perform() async throws -> some IntentResult {
-        await MainActor.run {
-            IntentBridge.shared.pendingSavedSongSearch = songName
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let library = await AudioLibrary.shared
+        await library.ensureLoaded()
+        let tracks = await MainActor.run { library.tracks }
+        let q = songName.lowercased()
+        guard let track = tracks.first(where: {
+            $0.title.lowercased().contains(q) || ($0.artist?.lowercased().contains(q) == true)
+        }) else {
+            return .result(dialog: "I couldn't find \"\(songName)\" in your library")
         }
-        return .result()
+        await MainActor.run {
+            AudioPlayer.shared.configureAudioSession()
+            AudioPlayer.shared.play(track: track, queue: tracks)
+        }
+        return .result(dialog: "Now playing \(track.title)")
     }
 }
 
@@ -41,16 +65,28 @@ struct PlaySavedSongIntent: AppIntent {
 struct PlayPlaylistIntent: AppIntent {
     static var title: LocalizedStringResource = "Play a Playlist"
     static var description = IntentDescription("Shuffle and play a playlist from your iMusic library")
-    static var openAppWhenRun: Bool = true
+    static var openAppWhenRun: Bool = false
 
     @Parameter(title: "Playlist Name", description: "Name of the playlist to play", requestValueDialog: "Which playlist would you like to play?")
     var playlistName: String
 
-    func perform() async throws -> some IntentResult {
-        await MainActor.run {
-            IntentBridge.shared.pendingPlaylistName = playlistName
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let library = await AudioLibrary.shared
+        await library.ensureLoaded()
+        let (tracks, playlists) = await MainActor.run { (library.tracks, library.playlists) }
+        let q = playlistName.lowercased()
+        guard let playlist = playlists.first(where: { $0.name.lowercased().contains(q) }) else {
+            return .result(dialog: "I couldn't find a playlist named \"\(playlistName)\"")
         }
-        return .result()
+        let playlistTracks = tracks.filter { playlist.trackIDs.contains($0.id) }.shuffled()
+        guard !playlistTracks.isEmpty else {
+            return .result(dialog: "The playlist \"\(playlist.name)\" is empty")
+        }
+        await MainActor.run {
+            AudioPlayer.shared.configureAudioSession()
+            AudioPlayer.shared.playAll(tracks: playlistTracks, playlistName: playlist.name)
+        }
+        return .result(dialog: "Now playing \(playlist.name) playlist")
     }
 }
 
@@ -59,13 +95,15 @@ struct PlayPlaylistIntent: AppIntent {
 struct PauseMusicIntent: AppIntent {
     static var title: LocalizedStringResource = "Pause Music"
     static var description = IntentDescription("Pause the currently playing song in iMusic")
-    static var openAppWhenRun: Bool = true
+    static var openAppWhenRun: Bool = false
 
-    func perform() async throws -> some IntentResult {
+    func perform() async throws -> some IntentResult & ProvidesDialog {
         await MainActor.run {
-            IntentBridge.shared.pendingPlayerAction = .pause
+            if AudioPlayer.shared.isPlaying {
+                AudioPlayer.shared.togglePlayPause()
+            }
         }
-        return .result()
+        return .result(dialog: "Paused")
     }
 }
 
@@ -74,13 +112,16 @@ struct PauseMusicIntent: AppIntent {
 struct ResumeMusicIntent: AppIntent {
     static var title: LocalizedStringResource = "Resume Music"
     static var description = IntentDescription("Resume playing music in iMusic")
-    static var openAppWhenRun: Bool = true
+    static var openAppWhenRun: Bool = false
 
-    func perform() async throws -> some IntentResult {
+    func perform() async throws -> some IntentResult & ProvidesDialog {
         await MainActor.run {
-            IntentBridge.shared.pendingPlayerAction = .resume
+            let player = AudioPlayer.shared
+            if !player.isPlaying && player.currentTrack != nil {
+                player.togglePlayPause()
+            }
         }
-        return .result()
+        return .result(dialog: "Resumed")
     }
 }
 
@@ -89,13 +130,13 @@ struct ResumeMusicIntent: AppIntent {
 struct SkipTrackIntent: AppIntent {
     static var title: LocalizedStringResource = "Skip Track"
     static var description = IntentDescription("Skip to the next song in iMusic")
-    static var openAppWhenRun: Bool = true
+    static var openAppWhenRun: Bool = false
 
-    func perform() async throws -> some IntentResult {
+    func perform() async throws -> some IntentResult & ProvidesDialog {
         await MainActor.run {
-            IntentBridge.shared.pendingPlayerAction = .skip
+            AudioPlayer.shared.playNext()
         }
-        return .result()
+        return .result(dialog: "Skipped")
     }
 }
 
@@ -104,13 +145,13 @@ struct SkipTrackIntent: AppIntent {
 struct PreviousTrackIntent: AppIntent {
     static var title: LocalizedStringResource = "Previous Track"
     static var description = IntentDescription("Go back to the previous song in iMusic")
-    static var openAppWhenRun: Bool = true
+    static var openAppWhenRun: Bool = false
 
-    func perform() async throws -> some IntentResult {
+    func perform() async throws -> some IntentResult & ProvidesDialog {
         await MainActor.run {
-            IntentBridge.shared.pendingPlayerAction = .previous
+            AudioPlayer.shared.playPrevious()
         }
-        return .result()
+        return .result(dialog: "Previous track")
     }
 }
 

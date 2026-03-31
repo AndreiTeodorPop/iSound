@@ -7,6 +7,8 @@ import AVKit
 
 @MainActor
 final class AudioLibrary: ObservableObject {
+    @MainActor static let shared = AudioLibrary()
+
     @Published private(set) var tracks: [Track] = []
     @Published var playlists: [Playlist] = []
 
@@ -22,6 +24,12 @@ final class AudioLibrary: ObservableObject {
     init() {
         loadPlaylists()
         Task { await loadExistingTracks() }
+    }
+
+    func ensureLoaded() async {
+        if tracks.isEmpty {
+            await loadExistingTracks()
+        }
     }
 
     // MARK: - Directory

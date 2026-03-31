@@ -54,7 +54,7 @@ private struct PlaylistNavTarget: Identifiable, Hashable {
 }
 
 struct ContentView: View {
-    @StateObject private var library = AudioLibrary()
+    @StateObject private var library: AudioLibrary = .shared
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var themeManager: ThemeManager
 

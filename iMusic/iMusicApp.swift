@@ -10,7 +10,7 @@ import AppIntents
 
 @main
 struct iMusicApp: App {
-    @StateObject private var sharedPlayer = AudioPlayer()
+    @StateObject private var sharedPlayer: AudioPlayer = .shared
     @StateObject private var themeManager = ThemeManager()
 
     init() {

@@ -7,6 +7,8 @@ import AVKit
 
 @MainActor
 final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    @MainActor static let shared = AudioPlayer()
+
     @Published private(set) var isPlaying: Bool = false
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
