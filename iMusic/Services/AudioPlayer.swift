@@ -22,6 +22,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     private var interruptionObserver: Any?
     private var routeChangeObserver: Any?
+    private var wasPlayingBeforeInterruption: Bool = false
 
     // Local track queue
     private var originalQueue: [Track] = []
@@ -115,6 +116,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         isPlaying = true
 
         streamPlayer?.play()
+        schedulePlayRetry()
 
         attachStreamTimeObserver()
 
@@ -201,11 +203,12 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             self.currentTime = 0
             player.delegate = self
             player.prepareToPlay()
-            player.play()
-            isPlaying = true
-            startTimer()
+            let started = player.play()
+            isPlaying = started
+            if started { startTimer() }
             updateNowPlayingInfo()
             saveLastPlayed()
+            if !started { schedulePlayRetry() }
         } catch {
             print("AudioPlayer error: \(error)")
         }
@@ -432,18 +435,44 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             pauseForInterruption()
         case .ended:
             let opts = AVAudioSession.InterruptionOptions(rawValue: (info[AVAudioSessionInterruptionOptionKey] as? UInt) ?? 0)
-            if opts.contains(.shouldResume), !isPlaying { togglePlayPause() }
+            // Resume if the system says to, OR if we were playing before (covers Siri intent
+            // TTS which doesn't always include the shouldResume flag)
+            let shouldResume = opts.contains(.shouldResume) || wasPlayingBeforeInterruption
+            wasPlayingBeforeInterruption = false
+            if shouldResume, !isPlaying { togglePlayPause() }
         @unknown default: break
         }
     }
 
     /// Pauses without toggling — safe to call when the system may have already paused AVAudioPlayer.
     private func pauseForInterruption() {
+        wasPlayingBeforeInterruption = isPlaying
         streamPlayer?.pause()
         player?.pause()
         isPlaying = false
         stopTimer()
         updateNowPlayingInfo()
+    }
+
+    /// Retries playback every second for up to 4 seconds.
+    /// Used when play() is called while the audio session is held by Siri —
+    /// the session becomes available once Siri finishes speaking the intent response.
+    private func schedulePlayRetry() {
+        Task { @MainActor [weak self] in
+            for _ in 0..<4 {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, self.currentTrack != nil, !self.isPlaying else { return }
+                do {
+                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
+                    try AVAudioSession.sharedInstance().setActive(true)
+                } catch { continue }
+                if let p = self.player, !p.isPlaying {
+                    if p.play() { self.isPlaying = true; self.startTimer(); self.updateNowPlayingInfo() }
+                } else if let sp = self.streamPlayer, sp.rate == 0 {
+                    sp.play(); self.isPlaying = true; self.updateNowPlayingInfo()
+                }
+            }
+        }
     }
 
     private func handleRouteChange(_ notification: Notification) {

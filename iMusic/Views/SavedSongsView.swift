@@ -223,6 +223,7 @@ struct SavedSongsView: View {
                     }
                 }
             }
+            .scrollIndicators(.hidden)
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: player.currentTrack != nil ? 100 : 0)
             }

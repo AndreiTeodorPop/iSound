@@ -57,7 +57,6 @@ private struct YouTubeResultRow: View {
     @ObservedObject var library: AudioLibrary
     @State private var showingDuplicateAlert = false
     @State private var downloadTask: Task<Void, Never>? = nil
-    @State private var savedFileURL: URL? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -89,12 +88,6 @@ private struct YouTubeResultRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onPlay)
-        .sheet(item: Binding(
-            get: { savedFileURL.map { IdentifiableURL($0) } },
-            set: { if $0 == nil { savedFileURL = nil } }
-        )) { identifiable in
-            ShareSheet(items: [identifiable.url])
-        }
     }
 
     @ViewBuilder
@@ -146,7 +139,6 @@ private struct YouTubeResultRow: View {
             await library.loadExistingTracks()
             let savedURL = library.downloadsDirectory.appendingPathComponent(fileName)
             onDownloaded(savedURL)
-            savedFileURL = savedURL
         } catch {
             if error is CancellationError || (error as? URLError)?.code == .cancelled {
                 onDownloadCancelled()
