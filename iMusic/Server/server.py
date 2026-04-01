@@ -12,6 +12,14 @@ import requests as http_requests
 FFMPEG_LOCATION = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
 FFMPEG_DIR = os.path.dirname(FFMPEG_LOCATION) if FFMPEG_LOCATION else None
 
+# Path to the Netscape-format cookies file used to bypass YouTube bot detection.
+# Inside Docker the working directory is /app, so cookies.txt lives at /app/cookies.txt.
+# When running locally the file is expected next to server.py.
+_SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+COOKIES_FILE = os.path.join(_SERVER_DIR, "cookies.txt") if os.path.exists(
+    os.path.join(_SERVER_DIR, "cookies.txt")
+) else "/app/cookies.txt"
+
 app = Flask(__name__)
 
 # Cache: video_id -> {url, title, artist, duration, expires}
@@ -28,10 +36,13 @@ def _fetch_info_with_retry(video_id, max_retries=3):
         "extractor_retries": 3,
         "sleep_interval": 2,
         "max_sleep_interval": 5,
-        # android client works without PO tokens on headless servers
+        "cookiefile": COOKIES_FILE,
+        "nocheckcertificate": True,
+        # web client is used first so the cookies are respected;
+        # android/tv_embedded act as fallbacks for content that blocks the web client.
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "android_creator", "tv_embedded"]
+                "player_client": ["web", "android", "android_creator", "tv_embedded"]
             }
         },
     }
@@ -150,6 +161,13 @@ def download():
             "preferredquality": "192",
         }],
         "keepvideo": False,
+        "cookiefile": COOKIES_FILE,
+        "nocheckcertificate": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["web", "android", "android_creator", "tv_embedded"]
+            }
+        },
         **({"ffmpeg_location": FFMPEG_DIR} if FFMPEG_DIR else {}),
     }
 
@@ -225,6 +243,13 @@ def related():
             "extract_flat": True,
             "skip_download": True,
             "playlistend": 11,
+            "cookiefile": COOKIES_FILE,
+            "nocheckcertificate": True,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["web", "android", "android_creator", "tv_embedded"]
+                }
+            },
         }
         with yt_dlp.YoutubeDL(search_opts) as ydl:
             search_info = ydl.extract_info(f"ytsearch11:{query}", download=False)

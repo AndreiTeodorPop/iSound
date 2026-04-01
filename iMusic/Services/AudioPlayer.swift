@@ -397,15 +397,30 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     private func playSuggested(for videoID: String) async {
         playedYouTubeIDs.insert(videoID)
+
+        guard let track = currentTrack else { stop(); return }
+
+        // Build a Spotify-Radio-style discovery query:
+        // "songs similar to <title> <artist>" surfaces genre/mood matches
+        // rather than same-artist uploads from YouTube's related API.
+        let cleanTitle = LyricsService.shared.cleanTitle(track.title)
+        let artist = track.artist ?? ""
+        let query: String
+        if artist.isEmpty {
+            query = "songs similar to \(cleanTitle)"
+        } else {
+            query = "songs similar to \(cleanTitle) \(artist)"
+        }
+
         do {
-            let suggested = try await StreamService.getRelated(for: videoID)
-            let fresh = suggested.filter { !playedYouTubeIDs.contains($0.id) }
-            guard !fresh.isEmpty else { stop(); return }
-            let results = fresh.map {
-                YouTubeResult(id: $0.id, title: $0.title, channelTitle: $0.channelTitle, duration: nil)
-            }
+            var results = try await YouTubeService.search(query)
+            // Exclude already-played and currently playing
+            results = results.filter { !playedYouTubeIDs.contains($0.id) && $0.id != videoID }
+            // Shuffle for variety so repeat listens feel fresh
+            results.shuffle()
+            guard !results.isEmpty else { stop(); return }
+
             youtubeQueue = results
-            // Try each candidate until one streams successfully
             for (index, result) in results.enumerated() {
                 youtubeIndex = index
                 do {
@@ -415,12 +430,12 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
                                 duration: stream.duration, videoID: result.id)
                     return
                 } catch {
-                    print("Suggested \(result.id) failed, trying next: \(error)")
+                    continue
                 }
             }
             stop()
         } catch {
-            print("Failed to fetch suggested videos: \(error)")
+            print("Suggestion search failed: \(error)")
             stop()
         }
     }
