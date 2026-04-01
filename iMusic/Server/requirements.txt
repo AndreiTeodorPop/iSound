@@ -1,6 +1,6 @@
 flask
 gunicorn
-yt-dlp>=2025.1.15
+yt-dlp
 requests
 langdetect
 deep-translator

@@ -96,6 +96,28 @@ def _fetch_info_with_retry(video_id, max_retries=3):
     raise last_err
 
 
+def _warmup_cache():
+    """Pre-download and cache the YouTube JS player at startup so the first real
+    user request doesn't need to fetch it (and hit rate limits)."""
+    try:
+        opts = {
+            "quiet": True,
+            "logger": _QuietLogger(),
+            "cachedir": YTDLP_CACHE_DIR,
+            "format": "bestaudio/best",
+            "extractor_args": {"youtube": {"player_client": ["web"]}},
+        }
+        if os.path.exists(COOKIES_FILE):
+            opts["cookiefile"] = COOKIES_FILE
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.extract_info("https://www.youtube.com/watch?v=dQw4w9WgXcQ", download=False)
+        print("yt-dlp JS player cache warmed up successfully", flush=True)
+    except Exception as e:
+        print(f"yt-dlp warm-up failed (non-fatal): {e}", flush=True)
+
+threading.Thread(target=_warmup_cache, daemon=True).start()
+
+
 def _get_info(video_id):
     now = time.time()
     with _cache_lock:

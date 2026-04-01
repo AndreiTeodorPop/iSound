@@ -13,9 +13,12 @@ WORKDIR /app
 # Copy project files
 COPY . .
 
-# Install Python dependencies (upgrade pip first to silence the outdated-pip notice)
-RUN pip install --no-cache-dir --quiet --upgrade pip && \
-    pip install --no-cache-dir --quiet -r requirements.txt
+# Install Python dependencies.
+# yt-dlp is upgraded to the absolute latest AFTER requirements.txt so Docker layer
+# caching never leaves an outdated yt-dlp (YouTube breaks old versions quickly).
+RUN pip install --no-cache-dir --quiet --root-user-action=ignore --upgrade pip && \
+    pip install --no-cache-dir --quiet --root-user-action=ignore -r requirements.txt && \
+    pip install --no-cache-dir --quiet --root-user-action=ignore --upgrade yt-dlp
 
 # Persistent yt-dlp cache (stores the YouTube JS player so signature solving
 # works without re-downloading on every container restart).
