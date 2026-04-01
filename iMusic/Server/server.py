@@ -12,20 +12,6 @@ import requests as http_requests
 FFMPEG_LOCATION = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
 FFMPEG_DIR = os.path.dirname(FFMPEG_LOCATION) if FFMPEG_LOCATION else None
 
-# Path to the Netscape-format cookies file used to bypass YouTube bot detection.
-# Inside Docker the working directory is /app, so cookies.txt lives at /app/cookies.txt.
-# When running locally the file is expected next to server.py.
-_SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
-COOKIES_FILE = os.path.join(_SERVER_DIR, "cookies.txt") if os.path.exists(
-    os.path.join(_SERVER_DIR, "cookies.txt")
-) else "/app/cookies.txt"
-
-# Persistent cache for yt-dlp (stores the YouTube JS player after first download so
-# signature/n-challenge solving works without re-downloading on every request).
-# Mount /app/yt-dlp-cache as a Docker volume to survive container restarts.
-YTDLP_CACHE_DIR = os.environ.get("YTDLP_CACHE_DIR", "/app/yt-dlp-cache")
-os.makedirs(YTDLP_CACHE_DIR, exist_ok=True)
-
 app = Flask(__name__)
 
 # Cache: video_id -> {url, title, artist, duration, expires}
@@ -34,122 +20,36 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
-# Profile 1: web with cookies + persistent JS player cache for signature solving.
-# Profile 2: ios without cookies — uses Apple's API (HLS streams, no signature needed).
-#            Only attempted if web fails; ios hits bot detection on rate-limited IPs.
-_CLIENT_PROFILES = [
-    (["web"], True),
-    (["ios"], False),
-]
-
-# HLS (m3u8) formats are pre-signed and need no JS decryption — ideal for ios client.
-_FORMAT_FALLBACKS = [
-    "bestaudio[protocol=m3u8_native]/bestaudio[protocol=m3u8]/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
-    "bestaudio[protocol=m3u8_native]/bestaudio[protocol=m3u8]/bestaudio/best",
-    "best[protocol=m3u8_native]/best[protocol=m3u8]/best",
-]
-
-
-class _QuietLogger:
-    """Fully silent yt-dlp logger — yt-dlp failures are expected and handled
-    by the Invidious fallback, so we don't need noise in the console."""
-    def debug(self, msg): pass
-    def info(self, msg): pass
-    def warning(self, msg): pass
-    def error(self, msg): pass
-
-
 def _fetch_info_with_retry(video_id, max_retries=3):
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    last_err = None
-
-    for clients, use_cookies in _CLIENT_PROFILES:
-        base_opts = {
-            "quiet": True,
-            "logger": _QuietLogger(),
-            "cachedir": YTDLP_CACHE_DIR,
-            "nocheckcertificate": True,
-            "extractor_args": {
-                "youtube": {"player_client": clients}
-            },
-        }
-        if use_cookies and os.path.exists(COOKIES_FILE):
-            base_opts["cookiefile"] = COOKIES_FILE
-
-        for fmt in _FORMAT_FALLBACKS:
-            opts = {**base_opts, "format": fmt}
-            try:
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    return ydl.extract_info(url, download=False)
-            except Exception as e:
-                last_err = e
-                err_str = str(e)
-                if "Requested format is not available" in err_str or \
-                   "Only images are available" in err_str or \
-                   "Sign in to confirm" in err_str:
-                    break  # this profile won't work, try next profile
-                # 429: brief wait then try next format
-                if "429" in err_str:
-                    time.sleep(3)
-                # any other error: move on immediately
-
-    raise last_err
-
-
-# Invidious public instances — tried in order when yt-dlp fails.
-# These run their own extraction and return pre-solved YouTube stream URLs.
-_INVIDIOUS_INSTANCES = [
-    "https://inv.nadeko.net",
-    "https://invidious.fdn.fr",
-    "https://yt.drgnz.club",
-    "https://invidious.privacyredirect.com",
-]
-
-
-def _fetch_info_invidious(video_id):
-    """Fetch stream URL from Invidious API (no signature solving required)."""
-    for base in _INVIDIOUS_INSTANCES:
-        try:
-            r = http_requests.get(
-                f"{base}/api/v1/videos/{video_id}",
-                headers={"User-Agent": "iMusic/1.0"},
-                timeout=8,
-            )
-            print(f"[Invidious] {base} → HTTP {r.status_code}", flush=True)
-            if r.status_code != 200:
-                continue
-            data = r.json()
-            if "error" in data:
-                print(f"[Invidious] {base} → API error: {data['error']}", flush=True)
-                continue
-
-            # Prefer adaptive audio-only formats; fall back to muxed streams
-            formats = data.get("adaptiveFormats", []) + data.get("formatStreams", [])
-            audio = [f for f in formats if "audio" in f.get("type", "") and "video" not in f.get("type", "")]
-            if not audio:
-                audio = formats
-            if not audio:
-                print(f"[Invidious] {base} → no formats found", flush=True)
-                continue
-
-            best = max(audio, key=lambda f: int(f.get("bitrate", 0)))
-            url = best.get("url")
-            if not url:
-                print(f"[Invidious] {base} → best format has no url", flush=True)
-                continue
-
-            print(f"[Invidious] {base} → OK", flush=True)
-            return {
-                "url":      url,
-                "title":    data.get("title", ""),
-                "artist":   data.get("author", ""),
-                "duration": int(data.get("lengthSeconds", 0)),
-                "expires":  time.time() + CACHE_TTL,
+    opts = {
+        "quiet": True,
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
+        "retries": 3,
+        "extractor_retries": 3,
+        "sleep_interval": 2,
+        "max_sleep_interval": 5,
+        # android client works without PO tokens on headless servers
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "android_creator", "tv_embedded"]
             }
+        },
+    }
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(
+                    f"https://www.youtube.com/watch?v={video_id}",
+                    download=False
+                )
         except Exception as e:
-            print(f"[Invidious] {base} → exception: {e}", flush=True)
-            continue
-    return None
+            last_err = e
+            if "429" in str(e) and attempt < max_retries - 1:
+                time.sleep(2 ** attempt)  # exponential backoff: 1s, 2s, 4s
+            else:
+                raise
+    raise last_err
 
 
 def _get_info(video_id):
@@ -159,29 +59,15 @@ def _get_info(video_id):
         if entry and entry["expires"] > now:
             return entry
 
-    entry = None
+    info = _fetch_info_with_retry(video_id)
 
-    # Try yt-dlp first (best quality when the server IP is not rate-limited)
-    try:
-        info = _fetch_info_with_retry(video_id)
-        entry = {
-            "url":      info["url"],
-            "title":    info.get("title", ""),
-            "artist":   info.get("uploader", ""),
-            "duration": info.get("duration", 0),
-            "expires":  now + CACHE_TTL,
-        }
-    except Exception:
-        pass
-
-    # Fall back to Invidious (pre-solved URLs, works around rate-limited IPs)
-    if not entry:
-        entry = _fetch_info_invidious(video_id)
-
-    if not entry:
-        print(f"[iMusic] All sources failed for video {video_id}", flush=True)
-        raise Exception("Could not fetch stream from YouTube or Invidious")
-
+    entry = {
+        "url":      info["url"],
+        "title":    info.get("title", ""),
+        "artist":   info.get("uploader", ""),
+        "duration": info.get("duration", 0),
+        "expires":  now + CACHE_TTL,
+    }
     with _cache_lock:
         _cache[video_id] = entry
     return entry
@@ -254,53 +140,26 @@ def download():
     tmp_dir = tempfile.mkdtemp()
     output_template = os.path.join(tmp_dir, "%(title)s.%(ext)s")
 
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    last_err = None
-    info = None
-
-    for clients, use_cookies in _CLIENT_PROFILES:
-        dl_base = {
-            "quiet": True,
-            "logger": _QuietLogger(),
-            "cachedir": YTDLP_CACHE_DIR,
-            "outtmpl": output_template,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }],
-            "keepvideo": False,
-            "nocheckcertificate": True,
-            "extractor_args": {
-                "youtube": {"player_client": clients}
-            },
-            **({"ffmpeg_location": FFMPEG_DIR} if FFMPEG_DIR else {}),
-        }
-        if use_cookies and os.path.exists(COOKIES_FILE):
-            dl_base["cookiefile"] = COOKIES_FILE
-
-        for fmt in _FORMAT_FALLBACKS:
-            opts = {**dl_base, "format": fmt}
-            try:
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                break  # success
-            except Exception as e:
-                last_err = e
-                err_str = str(e)
-                if "Requested format is not available" in err_str or \
-                   "Only images are available" in err_str:
-                    continue  # try next format
-                raise  # unexpected error — surface immediately
-
-        if info is not None:
-            break  # got a result, skip remaining client profiles
-
-    if info is None:
-        raise last_err
+    opts = {
+        "quiet": True,
+        "format": "bestaudio/best",
+        "outtmpl": output_template,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }],
+        "keepvideo": False,
+        **({"ffmpeg_location": FFMPEG_DIR} if FFMPEG_DIR else {}),
+    }
 
     try:
-        title = info.get("title", video_id)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(
+                f"https://www.youtube.com/watch?v={video_id}",
+                download=True
+            )
+            title = info.get("title", video_id)
 
         files = os.listdir(tmp_dir)
         if not files:
@@ -366,15 +225,6 @@ def related():
             "extract_flat": True,
             "skip_download": True,
             "playlistend": 11,
-            "quiet": True,
-            "logger": _QuietLogger(),
-            "nocheckcertificate": True,
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["web", "android"]
-                }
-            },
-            **( {"cookiefile": COOKIES_FILE} if os.path.exists(COOKIES_FILE) else {} ),
         }
         with yt_dlp.YoutubeDL(search_opts) as ydl:
             search_info = ydl.extract_info(f"ytsearch11:{query}", download=False)
