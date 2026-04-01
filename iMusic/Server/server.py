@@ -28,18 +28,21 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
-_FORMAT_FALLBACKS = [
-    "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
-    "bestaudio/best",
-    "best",
-]
-
-# Profile 1: web with cookies (best quality, needs Node.js for JS challenges).
-# Profile 2: android + mweb without cookies — GVS PO Token warnings are non-fatal;
-#            HLS/non-HTTPS formats still work and act as a reliable fallback.
+# Profile 1: web with cookies — best quality but needs Node.js for JS signatures.
+# Profile 2: ios without cookies — uses a different Apple API that returns HLS streams,
+#            which require NO signature solving. Most reliable headless fallback.
+# Profile 3: android without cookies — last resort; may hit bot detection.
 _CLIENT_PROFILES = [
     (["web"], True),
-    (["android", "mweb"], False),
+    (["ios"], False),
+    (["android"], False),
+]
+
+# HLS formats come first for ios; they are pre-signed and need no JS decryption.
+_FORMAT_FALLBACKS = [
+    "bestaudio[protocol=m3u8_native]/bestaudio[protocol=m3u8]/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+    "bestaudio[protocol=m3u8_native]/bestaudio[protocol=m3u8]/bestaudio/best",
+    "best[protocol=m3u8_native]/best[protocol=m3u8]/best",
 ]
 
 
