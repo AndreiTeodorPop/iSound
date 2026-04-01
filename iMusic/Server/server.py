@@ -20,6 +20,12 @@ COOKIES_FILE = os.path.join(_SERVER_DIR, "cookies.txt") if os.path.exists(
     os.path.join(_SERVER_DIR, "cookies.txt")
 ) else "/app/cookies.txt"
 
+# Persistent cache for yt-dlp (stores the YouTube JS player after first download so
+# signature/n-challenge solving works without re-downloading on every request).
+# Mount /app/yt-dlp-cache as a Docker volume to survive container restarts.
+YTDLP_CACHE_DIR = os.environ.get("YTDLP_CACHE_DIR", "/app/yt-dlp-cache")
+os.makedirs(YTDLP_CACHE_DIR, exist_ok=True)
+
 app = Flask(__name__)
 
 # Cache: video_id -> {url, title, artist, duration, expires}
@@ -28,17 +34,15 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
-# Profile 1: web with cookies — best quality but needs Node.js for JS signatures.
-# Profile 2: ios without cookies — uses a different Apple API that returns HLS streams,
-#            which require NO signature solving. Most reliable headless fallback.
-# Profile 3: android without cookies — last resort; may hit bot detection.
+# Profile 1: web with cookies + persistent JS player cache for signature solving.
+# Profile 2: ios without cookies — uses Apple's API (HLS streams, no signature needed).
+#            Only attempted if web fails; ios hits bot detection on rate-limited IPs.
 _CLIENT_PROFILES = [
     (["web"], True),
     (["ios"], False),
-    (["android"], False),
 ]
 
-# HLS formats come first for ios; they are pre-signed and need no JS decryption.
+# HLS (m3u8) formats are pre-signed and need no JS decryption — ideal for ios client.
 _FORMAT_FALLBACKS = [
     "bestaudio[protocol=m3u8_native]/bestaudio[protocol=m3u8]/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
     "bestaudio[protocol=m3u8_native]/bestaudio[protocol=m3u8]/bestaudio/best",
@@ -63,10 +67,7 @@ def _fetch_info_with_retry(video_id, max_retries=3):
         base_opts = {
             "quiet": True,
             "logger": _QuietLogger(),
-            "retries": 3,
-            "extractor_retries": 3,
-            "sleep_interval": 2,
-            "max_sleep_interval": 5,
+            "cachedir": YTDLP_CACHE_DIR,
             "nocheckcertificate": True,
             "extractor_args": {
                 "youtube": {"player_client": clients}
@@ -77,20 +78,20 @@ def _fetch_info_with_retry(video_id, max_retries=3):
 
         for fmt in _FORMAT_FALLBACKS:
             opts = {**base_opts, "format": fmt}
-            for attempt in range(max_retries):
-                try:
-                    with yt_dlp.YoutubeDL(opts) as ydl:
-                        return ydl.extract_info(url, download=False)
-                except Exception as e:
-                    last_err = e
-                    err_str = str(e)
-                    if "Requested format is not available" in err_str or \
-                       "Only images are available" in err_str:
-                        break  # try next format
-                    if "429" in err_str and attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)
-                    else:
-                        break
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+            except Exception as e:
+                last_err = e
+                err_str = str(e)
+                if "Requested format is not available" in err_str or \
+                   "Only images are available" in err_str or \
+                   "Sign in to confirm" in err_str:
+                    break  # this profile won't work, try next profile
+                # 429: brief wait then try next format
+                if "429" in err_str:
+                    time.sleep(3)
+                # any other error: move on immediately
 
     raise last_err
 
@@ -191,6 +192,7 @@ def download():
         dl_base = {
             "quiet": True,
             "logger": _QuietLogger(),
+            "cachedir": YTDLP_CACHE_DIR,
             "outtmpl": output_template,
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",

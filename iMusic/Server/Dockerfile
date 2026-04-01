@@ -13,8 +13,14 @@ WORKDIR /app
 # Copy project files
 COPY . .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies (upgrade pip first to silence the outdated-pip notice)
+RUN pip install --no-cache-dir --quiet --upgrade pip && \
+    pip install --no-cache-dir --quiet -r requirements.txt
+
+# Persistent yt-dlp cache (stores the YouTube JS player so signature solving
+# works without re-downloading on every container restart).
+# Mount this as a volume: -v yt-dlp-cache:/app/yt-dlp-cache
+RUN mkdir -p /app/yt-dlp-cache
 
 # Optional: default port if Railway doesn't set it
 ENV PORT=8080
