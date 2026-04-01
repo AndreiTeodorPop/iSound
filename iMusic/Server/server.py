@@ -34,39 +34,50 @@ _FORMAT_FALLBACKS = [
     "best",
 ]
 
+# Each attempt profile: (client_list, use_cookies)
+# android/ios don't support cookies, so we try web+ios with cookies first,
+# then android without cookies as a last resort.
+_CLIENT_PROFILES = [
+    (["web", "ios"], True),
+    (["android", "mweb"], False),
+]
+
+
 def _fetch_info_with_retry(video_id, max_retries=3):
-    base_opts = {
-        "quiet": True,
-        "retries": 3,
-        "extractor_retries": 3,
-        "sleep_interval": 2,
-        "max_sleep_interval": 5,
-        "cookiefile": COOKIES_FILE,
-        "nocheckcertificate": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["web", "android", "android_creator", "tv_embedded"]
-            }
-        },
-    }
     url = f"https://www.youtube.com/watch?v={video_id}"
     last_err = None
 
-    for fmt in _FORMAT_FALLBACKS:
-        opts = {**base_opts, "format": fmt}
-        for attempt in range(max_retries):
-            try:
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    return ydl.extract_info(url, download=False)
-            except Exception as e:
-                last_err = e
-                err_str = str(e)
-                if "Requested format is not available" in err_str:
-                    break  # try next format immediately
-                if "429" in err_str and attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)
-                else:
-                    break
+    for clients, use_cookies in _CLIENT_PROFILES:
+        base_opts = {
+            "quiet": True,
+            "retries": 3,
+            "extractor_retries": 3,
+            "sleep_interval": 2,
+            "max_sleep_interval": 5,
+            "nocheckcertificate": True,
+            "extractor_args": {
+                "youtube": {"player_client": clients}
+            },
+        }
+        if use_cookies and os.path.exists(COOKIES_FILE):
+            base_opts["cookiefile"] = COOKIES_FILE
+
+        for fmt in _FORMAT_FALLBACKS:
+            opts = {**base_opts, "format": fmt}
+            for attempt in range(max_retries):
+                try:
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        return ydl.extract_info(url, download=False)
+                except Exception as e:
+                    last_err = e
+                    err_str = str(e)
+                    if "Requested format is not available" in err_str or \
+                       "Only images are available" in err_str:
+                        break  # try next format
+                    if "429" in err_str and attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)
+                    else:
+                        break
 
     raise last_err
 
@@ -159,40 +170,45 @@ def download():
     tmp_dir = tempfile.mkdtemp()
     output_template = os.path.join(tmp_dir, "%(title)s.%(ext)s")
 
-    base_opts = {
-        "quiet": True,
-        "outtmpl": output_template,
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
-        }],
-        "keepvideo": False,
-        "cookiefile": COOKIES_FILE,
-        "nocheckcertificate": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["web", "android", "android_creator", "tv_embedded"]
-            }
-        },
-        **({"ffmpeg_location": FFMPEG_DIR} if FFMPEG_DIR else {}),
-    }
-
     url = f"https://www.youtube.com/watch?v={video_id}"
     last_err = None
     info = None
 
-    for fmt in _FORMAT_FALLBACKS:
-        opts = {**base_opts, "format": fmt}
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-            break  # success
-        except Exception as e:
-            last_err = e
-            if "Requested format is not available" in str(e):
-                continue  # try next format
-            raise  # unexpected error — surface immediately
+    for clients, use_cookies in _CLIENT_PROFILES:
+        dl_base = {
+            "quiet": True,
+            "outtmpl": output_template,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
+            "keepvideo": False,
+            "nocheckcertificate": True,
+            "extractor_args": {
+                "youtube": {"player_client": clients}
+            },
+            **({"ffmpeg_location": FFMPEG_DIR} if FFMPEG_DIR else {}),
+        }
+        if use_cookies and os.path.exists(COOKIES_FILE):
+            dl_base["cookiefile"] = COOKIES_FILE
+
+        for fmt in _FORMAT_FALLBACKS:
+            opts = {**dl_base, "format": fmt}
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                break  # success
+            except Exception as e:
+                last_err = e
+                err_str = str(e)
+                if "Requested format is not available" in err_str or \
+                   "Only images are available" in err_str:
+                    continue  # try next format
+                raise  # unexpected error — surface immediately
+
+        if info is not None:
+            break  # got a result, skip remaining client profiles
 
     if info is None:
         raise last_err
@@ -264,13 +280,13 @@ def related():
             "extract_flat": True,
             "skip_download": True,
             "playlistend": 11,
-            "cookiefile": COOKIES_FILE,
             "nocheckcertificate": True,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["web", "android", "android_creator", "tv_embedded"]
+                    "player_client": ["web", "ios"]
                 }
             },
+            **( {"cookiefile": COOKIES_FILE} if os.path.exists(COOKIES_FILE) else {} ),
         }
         with yt_dlp.YoutubeDL(search_opts) as ydl:
             search_info = ydl.extract_info(f"ytsearch11:{query}", download=False)
