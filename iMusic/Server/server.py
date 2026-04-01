@@ -28,38 +28,46 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
+_FORMAT_FALLBACKS = [
+    "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+    "bestaudio/best",
+    "best",
+]
+
 def _fetch_info_with_retry(video_id, max_retries=3):
-    opts = {
+    base_opts = {
         "quiet": True,
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=480]/best",
         "retries": 3,
         "extractor_retries": 3,
         "sleep_interval": 2,
         "max_sleep_interval": 5,
         "cookiefile": COOKIES_FILE,
         "nocheckcertificate": True,
-        # web client is used first so the cookies are respected;
-        # android/tv_embedded act as fallbacks for content that blocks the web client.
         "extractor_args": {
             "youtube": {
                 "player_client": ["web", "android", "android_creator", "tv_embedded"]
             }
         },
     }
+    url = f"https://www.youtube.com/watch?v={video_id}"
     last_err = None
-    for attempt in range(max_retries):
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                return ydl.extract_info(
-                    f"https://www.youtube.com/watch?v={video_id}",
-                    download=False
-                )
-        except Exception as e:
-            last_err = e
-            if "429" in str(e) and attempt < max_retries - 1:
-                time.sleep(2 ** attempt)  # exponential backoff: 1s, 2s, 4s
-            else:
-                raise
+
+    for fmt in _FORMAT_FALLBACKS:
+        opts = {**base_opts, "format": fmt}
+        for attempt in range(max_retries):
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+            except Exception as e:
+                last_err = e
+                err_str = str(e)
+                if "Requested format is not available" in err_str:
+                    break  # try next format immediately
+                if "429" in err_str and attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    break
+
     raise last_err
 
 
@@ -151,9 +159,8 @@ def download():
     tmp_dir = tempfile.mkdtemp()
     output_template = os.path.join(tmp_dir, "%(title)s.%(ext)s")
 
-    opts = {
+    base_opts = {
         "quiet": True,
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=480]/best",
         "outtmpl": output_template,
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
@@ -171,13 +178,27 @@ def download():
         **({"ffmpeg_location": FFMPEG_DIR} if FFMPEG_DIR else {}),
     }
 
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    last_err = None
+    info = None
+
+    for fmt in _FORMAT_FALLBACKS:
+        opts = {**base_opts, "format": fmt}
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+            break  # success
+        except Exception as e:
+            last_err = e
+            if "Requested format is not available" in str(e):
+                continue  # try next format
+            raise  # unexpected error — surface immediately
+
+    if info is None:
+        raise last_err
+
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(
-                f"https://www.youtube.com/watch?v={video_id}",
-                download=True
-            )
-            title = info.get("title", video_id)
+        title = info.get("title", video_id)
 
         files = os.listdir(tmp_dir)
         if not files:
