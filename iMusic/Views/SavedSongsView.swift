@@ -137,26 +137,28 @@ struct SavedSongsView: View {
     @AppStorage("savedSongsSortOrder") private var sortOrder: TrackSortOrder = .recentlyAdded
 
     enum TrackSortOrder: String, CaseIterable {
-        case recentlyAdded, titleAZ, titleZA, artist
+        case titleAZ, titleZA, recentlyAdded, defaultOrder
 
-        static var allCases: [TrackSortOrder] { [.recentlyAdded, .titleAZ, .artist] }
+        static var allCases: [TrackSortOrder] { [.titleAZ, .recentlyAdded, .defaultOrder] }
 
         var label: String {
             switch self {
-            case .recentlyAdded: return "Recently added"
             case .titleAZ:       return "Alphabetically (A–Z)"
             case .titleZA:       return "Alphabetically (Z–A)"
-            case .artist:        return "Artist"
+            case .recentlyAdded: return "Recently added"
+            case .defaultOrder:  return "Default"
             }
         }
+
+        var isAlphabetical: Bool { self == .titleAZ || self == .titleZA }
     }
 
     private var sortedTracks: [Track] {
         switch sortOrder {
-        case .recentlyAdded: return library.tracks
         case .titleAZ:       return library.tracks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        case .titleZA:       return library.tracks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending }
-        case .artist:        return library.tracks.sorted { ($0.artist ?? "").localizedCaseInsensitiveCompare($1.artist ?? "") == .orderedAscending }
+        case .titleZA:       return library.tracks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending}
+        case .recentlyAdded: return library.tracks
+        case .defaultOrder:  return library.tracks
         }
     }
 
@@ -236,12 +238,12 @@ struct SavedSongsView: View {
                     }
                 }
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(sortOrder.isAlphabetical ? .hidden : .automatic)
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: player.currentTrack != nil ? 100 : 0)
             }
             .overlay(alignment: .trailing) {
-                if !filteredTracks.isEmpty {
+                if !filteredTracks.isEmpty && (sortOrder == .titleAZ || sortOrder == .titleZA) {
                     let available: Set<String> = Set(filteredTracks.map { track in
                         let ch = track.title.first
                         return (ch?.isLetter == true) ? String(ch!).uppercased() : "#"
