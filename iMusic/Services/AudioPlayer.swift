@@ -110,6 +110,12 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         if !isShuffled { originalQueue = playlistQueue }
     }
 
+    /// Inserts a YouTube result immediately after the current position in the YouTube queue.
+    func addYouTubeResultToQueue(_ result: YouTubeResult) {
+        guard !youtubeQueue.isEmpty else { return }
+        youtubeQueue.insert(result, at: min(youtubeIndex + 1, youtubeQueue.count))
+    }
+
     /// Appends a track immediately after the current position in the local queue.
     /// If nothing is playing yet the track is placed at the front so it plays next.
     /// No-op for YouTube queues — there is no local queue to append to.

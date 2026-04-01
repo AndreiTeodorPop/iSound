@@ -407,7 +407,7 @@ struct ContentView: View {
     private var playlistsSection: some View {
         Section {
             ForEach(sortedPlaylists) { playlist in
-                PlaylistLibraryRow(playlist: playlist) {
+                PlaylistLibraryRow(playlist: playlist, trackCount: library.tracks.filter { playlist.trackIDs.contains($0.id) }.count) {
                     selectedPlaylistNav = PlaylistNavTarget(id: playlist.id, action: .none)
                 } onAddSongs: {
                     selectedPlaylistNav = PlaylistNavTarget(id: playlist.id, action: .addSongs)
@@ -519,6 +519,7 @@ struct ContentView: View {
 
 private struct PlaylistLibraryRow: View {
     let playlist: Playlist
+    let trackCount: Int
     let onTap: () -> Void
     let onAddSongs: () -> Void
     let onSortSongs: () -> Void
@@ -538,7 +539,7 @@ private struct PlaylistLibraryRow: View {
                         .overlay(Image(systemName: "music.note.list").foregroundColor(.white))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(playlist.name).font(.headline)
-                        Text("\(playlist.trackIDs.count) songs")
+                        Text("\(trackCount) songs")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -558,6 +559,7 @@ private struct PlaylistLibraryRow: View {
             .sheet(isPresented: $showingOptions) {
                 PlaylistOptionsSheet(
                     playlist: playlist,
+                    trackCount: trackCount,
                     onAddSongs: { showingOptions = false; onAddSongs() },
                     onSortSongs: { showingOptions = false; onSortSongs() },
                     onEdit: { showingOptions = false; onEdit() },
@@ -572,6 +574,7 @@ private struct PlaylistLibraryRow: View {
 
 private struct PlaylistOptionsSheet: View {
     let playlist: Playlist
+    let trackCount: Int
     let onAddSongs: () -> Void
     let onSortSongs: () -> Void
     let onEdit: () -> Void
@@ -590,7 +593,7 @@ private struct PlaylistOptionsSheet: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(playlist.name)
                         .font(.headline)
-                    Text("\(playlist.trackIDs.count) songs")
+                    Text("\(trackCount) songs")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

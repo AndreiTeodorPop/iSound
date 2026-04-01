@@ -55,7 +55,9 @@ private struct YouTubeResultRow: View {
     let onDownloadError: (Error) -> Void
 
     @ObservedObject var library: AudioLibrary
+    @EnvironmentObject private var player: AudioPlayer
     @State private var showingDuplicateAlert = false
+    @State private var showingOptions = false
     @State private var downloadTask: Task<Void, Never>? = nil
 
     var body: some View {
@@ -83,11 +85,32 @@ private struct YouTubeResultRow: View {
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
-                downloadButton
+                Button {
+                    showingOptions = true
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
             }
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onPlay)
+        .sheet(isPresented: $showingOptions) {
+            YouTubeTrackOptionsSheet(
+                result: result,
+                isDownloaded: isDownloaded,
+                isDownloading: isDownloading,
+                onDownloadStarted: onDownloadStarted,
+                onDownloaded: onDownloaded,
+                onDownloadCancelled: onDownloadCancelled,
+                onDownloadError: onDownloadError,
+                library: library
+            )
+            .environmentObject(player)
+        }
     }
 
     @ViewBuilder
@@ -204,6 +227,12 @@ struct YouTubeSearchView: View {
             .scrollIndicators(.visible)
             .overlay { overlayView }
             .overlay(alignment: .bottom) { toastOverlay }
+            .onChange(of: library.tracks) { _, tracks in
+                let savedTitles = Set(tracks.map { $0.title })
+                downloadedIDs = downloadedIDs.filter { id in
+                    results.first(where: { $0.id == id }).map { savedTitles.contains($0.title) } ?? false
+                }
+            }
             .onReceive(IntentBridge.shared.$pendingYouTubeSearch.compactMap { $0 }) { searchQuery in
                 IntentBridge.shared.pendingYouTubeSearch = nil
                 query = searchQuery
@@ -238,7 +267,7 @@ struct YouTubeSearchView: View {
                     downloadingIDs.remove(result.id)
                     _ = downloadedIDs.insert(result.id)
                 }
-                showToast(.success("Saved to \"\(savedURL.deletingLastPathComponent().lastPathComponent)\""))
+                showToast(.success("Saved to library"))
             },
             onDownloadCancelled: {
                 withAnimation { _ = downloadingIDs.remove(result.id) }
@@ -336,6 +365,295 @@ struct YouTubeSearchView: View {
             ToastView(toast: t)
                 .padding(.bottom, 100)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+}
+
+// MARK: - YouTube Track Options Sheet
+
+struct YouTubeTrackOptionsSheet: View {
+    let result: YouTubeResult
+    let isDownloaded: Bool
+    let isDownloading: Bool
+
+    let onDownloadStarted: () -> Void
+    let onDownloaded: (URL) -> Void
+    let onDownloadCancelled: () -> Void
+    let onDownloadError: (Error) -> Void
+
+    @ObservedObject var library: AudioLibrary
+    @EnvironmentObject private var player: AudioPlayer
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var showingAddToPlaylist = false
+    @State private var isSavingToLibrary = false
+    @State private var isSavingToFiles = false
+    @State private var saveToLibraryTask: Task<Void, Never>? = nil
+    @State private var saveToFilesTask: Task<Void, Never>? = nil
+
+    private var thumbnailURL: URL? {
+        URL(string: "https://img.youtube.com/vi/\(result.id)/mqdefault.jpg")
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                Spacer().frame(height: 36)
+
+                // Thumbnail
+                AsyncImage(url: thumbnailURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    default:
+                        Color(white: 0.2)
+                            .overlay(
+                                Image(systemName: "play.rectangle")
+                                    .font(.system(size: 48))
+                                    .foregroundStyle(Color(white: 0.5))
+                            )
+                    }
+                }
+                .frame(width: 200, height: 113)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.bottom, 20)
+
+                // Title + channel
+                VStack(spacing: 6) {
+                    Text(result.title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+
+                    Text(result.channelTitle)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color(white: 0.6))
+                        .lineLimit(1)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+                .padding(.bottom, 32)
+
+                // Options
+                VStack(spacing: 0) {
+                    optionRow(
+                        icon: isDownloaded ? "checkmark.circle.fill" : "music.note.list",
+                        title: isDownloaded ? "Saved to library" : "Add to saved songs",
+                        iconColor: isDownloaded ? .green : .white,
+                        isLoading: isSavingToLibrary
+                    ) {
+                        guard !isDownloaded, !isSavingToLibrary else { return }
+                        isSavingToLibrary = true
+                        saveToLibraryTask = Task { await saveToLibrary() }
+                    }
+
+                    optionRow(icon: "play.circle", title: "Add to player queue") {
+                        player.addYouTubeResultToQueue(result)
+                        dismiss()
+                    }
+
+                    optionRow(icon: "text.badge.plus", title: "Add to playlist") {
+                        showingAddToPlaylist = true
+                    }
+
+                    optionRow(
+                        icon: "arrow.down.to.line",
+                        title: isSavingToFiles ? "Preparing…" : "Download",
+                        isLoading: isSavingToFiles
+                    ) {
+                        guard !isSavingToFiles else { return }
+                        isSavingToFiles = true
+                        saveToFilesTask = Task { await saveToFiles() }
+                    }
+                }
+
+                Spacer(minLength: 24)
+
+                Button { dismiss() } label: {
+                    Text("CANCEL")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(Color(white: 0.15))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 36)
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.hidden)
+        .presentationCornerRadius(20)
+        .sheet(isPresented: $showingAddToPlaylist) {
+            YouTubeAddToPlaylistSheet(result: result, library: library,
+                                      onDownloadStarted: onDownloadStarted,
+                                      onDownloaded: onDownloaded,
+                                      onDownloadCancelled: onDownloadCancelled,
+                                      onDownloadError: onDownloadError)
+        }
+    }
+
+    private func optionRow(icon: String, title: String, iconColor: Color = .white, isLoading: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 20) {
+                if isLoading {
+                    ProgressView()
+                        .frame(width: 28)
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundStyle(iconColor)
+                        .frame(width: 28)
+                }
+                Text(title)
+                    .font(.system(size: 17, weight: .regular))
+                    .foregroundStyle(.white)
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+            .frame(height: 56)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Saves the song into the app library (Songs tab)
+    private func saveToLibrary() async {
+        onDownloadStarted()
+        do {
+            let tempURL = try await StreamService.downloadAudioToTemp(for: result.id, title: result.title)
+            let fileName = tempURL.lastPathComponent
+            try library.copyToDownloads(from: tempURL, fileName: fileName)
+            await library.loadExistingTracks()
+            let savedURL = library.downloadsDirectory.appendingPathComponent(fileName)
+            onDownloaded(savedURL)
+            isSavingToLibrary = false
+            dismiss()
+        } catch {
+            isSavingToLibrary = false
+            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                onDownloadCancelled()
+            } else {
+                onDownloadError(error)
+            }
+        }
+    }
+
+    // Downloads to a temp file and presents the iOS Save to Files / share sheet
+    private func saveToFiles() async {
+        do {
+            let tempURL = try await StreamService.downloadAudioToTemp(for: result.id, title: result.title)
+            isSavingToFiles = false
+            presentShareSheet(url: tempURL)
+        } catch {
+            isSavingToFiles = false
+            if !(error is CancellationError || (error as? URLError)?.code == .cancelled) {
+                onDownloadError(error)
+            }
+        }
+    }
+
+    private func presentShareSheet(url: URL) {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController
+        else { return }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        top.present(activityVC, animated: true)
+    }
+}
+
+// MARK: - YouTube Add to Playlist Sheet
+
+private struct YouTubeAddToPlaylistSheet: View {
+    let result: YouTubeResult
+    @ObservedObject var library: AudioLibrary
+
+    let onDownloadStarted: () -> Void
+    let onDownloaded: (URL) -> Void
+    let onDownloadCancelled: () -> Void
+    let onDownloadError: (Error) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var downloadingFor: UUID? = nil
+
+    var body: some View {
+        NavigationStack {
+            List(library.playlists, id: \.id) { playlist in
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(playlist.name).font(.headline).lineLimit(1)
+                        Text("\(playlist.trackIDs.count) songs").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if downloadingFor == playlist.id {
+                        ProgressView().frame(width: 24, height: 24)
+                    } else {
+                        Button {
+                            downloadAndAdd(to: playlist)
+                        } label: {
+                            Image(systemName: "plus.circle")
+                                .font(.title3)
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .navigationTitle("Add to Playlist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .overlay {
+                if library.playlists.isEmpty {
+                    ContentUnavailableView("No playlists", systemImage: "music.note.list",
+                                          description: Text("Create a playlist in the Library tab first."))
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationCornerRadius(20)
+    }
+
+    private func downloadAndAdd(to playlist: Playlist) {
+        let playlistID = playlist.id
+        downloadingFor = playlistID
+        onDownloadStarted()
+        Task {
+            do {
+                let tempURL = try await StreamService.downloadAudioToTemp(for: result.id, title: result.title)
+                let fileName = tempURL.lastPathComponent
+                try library.copyToDownloads(from: tempURL, fileName: fileName)
+                await library.loadExistingTracks()
+                let savedURL = library.downloadsDirectory.appendingPathComponent(fileName)
+                // Match by filename — more reliable than full URL comparison
+                if let track = library.tracks.first(where: { $0.url.lastPathComponent == fileName }),
+                   let target = library.playlists.first(where: { $0.id == playlistID }) {
+                    library.addTrack(track, to: target)
+                }
+                // Mark as saved in the search results (Add to saved songs state)
+                onDownloaded(savedURL)
+                downloadingFor = nil
+                dismiss()
+            } catch {
+                downloadingFor = nil
+                if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                    onDownloadCancelled()
+                } else {
+                    onDownloadError(error)
+                }
+            }
         }
     }
 }

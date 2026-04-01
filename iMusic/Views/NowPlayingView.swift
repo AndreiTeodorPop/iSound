@@ -9,11 +9,17 @@ struct NowPlayingView: View {
 
     @ObservedObject var library: AudioLibrary
 
-    @State private var showingQueue          = false
-    @State private var showingPlaylistPicker = false
-    @State private var showingLyrics         = false
+    @State private var showingQueue  = false
+    @State private var showingLyrics = false
+    @State private var showingOptions        = false
     @State private var toast: ToastType?
     @State private var toastTask: Task<Void, Never>?
+    @State private var isDownloadingYouTube  = false
+
+    private var currentYouTubeVideoID: String? {
+        player.currentTrack?.youtubeVideoID
+    }
+
 
     // True if there is a next track in either queue
     private var hasNext: Bool {
@@ -49,7 +55,15 @@ struct NowPlayingView: View {
                     }
                 }
                 Spacer()
-                Color.clear.frame(width: 44, height: 44)
+                Button { showingOptions = true } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.title2.bold())
+                        .foregroundStyle(.primary)
+                        .padding(10)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .disabled(player.currentTrack == nil)
             }
             .padding(.horizontal)
             .padding(.top, 10)
@@ -73,9 +87,38 @@ struct NowPlayingView: View {
                 Text(player.currentTrack?.title ?? "Unknown")
                     .font(.title.bold())
                     .multilineTextAlignment(.center)
-                Text(player.currentTrack?.artist ?? "Unknown Artist")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 12) {
+                    Spacer(minLength: 44)
+                    Text(player.currentTrack?.artist ?? "Unknown Artist")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+
+                    if currentYouTubeVideoID != nil {
+                        Button {
+                            if !isDownloadingYouTube {
+                                isDownloadingYouTube = true
+                                Task { await downloadCurrentYouTubeTrack() }
+                            }
+                        } label: {
+                            Group {
+                                if isDownloadingYouTube {
+                                    ProgressView().frame(width: 28, height: 28)
+                                } else {
+                                    Image(systemName: "arrow.down.circle")
+                                        .foregroundStyle(.secondary)
+                                        .font(.title2)
+                                }
+                            }
+                            .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Spacer(minLength: 44)
+                    }
+                }
             }
             .padding(.horizontal)
 
@@ -132,11 +175,6 @@ struct NowPlayingView: View {
 
                 Spacer()
 
-                // Add to Playlist
-                addToPlaylistButton
-
-                Spacer()
-
                 // Lyrics
                 Button { showingLyrics = true } label: {
                     Image(systemName: "quote.bubble")
@@ -175,38 +213,81 @@ struct NowPlayingView: View {
         }
         .padding(.bottom, 40)
         .overlay(alignment: .center) { toastOverlay }
-    }
-
-    // MARK: - Add to Playlist Button
-
-    private var eligiblePlaylists: [Playlist] {
-        guard let track = player.currentTrack else { return [] }
-        let resolved = library.localTrack(matching: track)
-        return library.playlists.filter { !$0.trackIDs.contains(resolved.id) }
+        .sheet(isPresented: $showingOptions) { optionsSheet }
     }
 
     @ViewBuilder
-    private var addToPlaylistButton: some View {
-        Button { showingPlaylistPicker = true } label: {
-            Image(systemName: "plus.circle")
-                .font(.title3)
-                .foregroundStyle(eligiblePlaylists.isEmpty ? .secondary : .primary)
-        }
-        .disabled(eligiblePlaylists.isEmpty || player.currentTrack == nil)
-        .confirmationDialog(
-            "Add to Playlist",
-            isPresented: $showingPlaylistPicker,
-            titleVisibility: .visible
-        ) {
-            ForEach(eligiblePlaylists) { playlist in
-                Button(playlist.name) {
-                    guard let track = player.currentTrack else { return }
-                    library.addTrack(library.localTrack(matching: track), to: playlist)
-                    showToast(.success("Added to \"\(playlist.name)\""))
+    private var optionsSheet: some View {
+        if let track = player.currentTrack {
+            if let videoID = track.youtubeVideoID {
+                let ytResult = YouTubeResult(
+                    id: videoID,
+                    title: track.title,
+                    channelTitle: track.artist ?? "",
+                    duration: nil
+                )
+                YouTubeTrackOptionsSheet(
+                    result: ytResult,
+                    isDownloaded: library.tracks.contains { $0.title == track.title },
+                    isDownloading: false,
+                    onDownloadStarted: {},
+                    onDownloaded: { _ in },
+                    onDownloadCancelled: {},
+                    onDownloadError: { _ in },
+                    library: library
+                )
+                .environmentObject(player)
+            } else {
+                let currentPlaylist = library.playlists.first {
+                    $0.name == player.currentPlaylistName
                 }
+                TrackOptionsSheet(
+                    track: track,
+                    playlistContext: currentPlaylist,
+                    onAddToQueue: { player.addToQueue(track) },
+                    onDelete: {
+                        Task {
+                            await library.deleteTrack(track)
+                            dismiss()
+                        }
+                    },
+                    onRemoveFromPlaylist: currentPlaylist.map { playlist in
+                        { library.removeTrack(track, from: playlist) }
+                    },
+                    library: library
+                )
+                .environmentObject(player)
             }
-            Button("Cancel", role: .cancel) {}
         }
+    }
+
+
+    // MARK: - YouTube Download
+
+    private func downloadCurrentYouTubeTrack() async {
+        guard let videoID = currentYouTubeVideoID,
+              let title = player.currentTrack?.title else {
+            isDownloadingYouTube = false
+            return
+        }
+        do {
+            let tempURL = try await StreamService.downloadAudioToTemp(for: videoID, title: title)
+            isDownloadingYouTube = false
+            presentShareSheet(url: tempURL)
+        } catch {
+            isDownloadingYouTube = false
+            showToast(.error("Download failed"))
+        }
+    }
+
+    private func presentShareSheet(url: URL) {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController
+        else { return }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        top.present(activityVC, animated: true)
     }
 
     // MARK: - Toast

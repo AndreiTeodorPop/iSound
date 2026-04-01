@@ -12,6 +12,7 @@ final class AudioLibrary: ObservableObject {
     @Published private(set) var tracks: [Track] = []
     @Published var playlists: [Playlist] = []
     @Published private(set) var likedTrackIDs: Set<UUID> = []
+    @Published private(set) var likedYouTubeVideoIDs: Set<String> = []
 
     private let fileManager = FileManager.default
 
@@ -27,9 +28,15 @@ final class AudioLibrary: ObservableObject {
         return docs.appendingPathComponent("liked_tracks.json")
     }
 
+    private var likedYouTubeVideoIDsFileURL: URL {
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appendingPathComponent("liked_youtube_videos.json")
+    }
+
     init() {
         loadPlaylists()
         loadLikedTrackIDs()
+        loadLikedYouTubeVideoIDs()
         Task { await loadExistingTracks() }
     }
 
@@ -109,6 +116,31 @@ final class AudioLibrary: ObservableObject {
               let ids = try? JSONDecoder().decode([UUID].self, from: data)
         else { return }
         likedTrackIDs = Set(ids)
+    }
+
+    func isYouTubeLiked(videoID: String) -> Bool {
+        likedYouTubeVideoIDs.contains(videoID)
+    }
+
+    func toggleYouTubeLike(videoID: String) {
+        if likedYouTubeVideoIDs.contains(videoID) {
+            likedYouTubeVideoIDs.remove(videoID)
+        } else {
+            likedYouTubeVideoIDs.insert(videoID)
+        }
+        savelikedYouTubeVideoIDs()
+    }
+
+    private func savelikedYouTubeVideoIDs() {
+        guard let data = try? JSONEncoder().encode(Array(likedYouTubeVideoIDs)) else { return }
+        try? data.write(to: likedYouTubeVideoIDsFileURL, options: .atomic)
+    }
+
+    private func loadLikedYouTubeVideoIDs() {
+        guard let data = try? Data(contentsOf: likedYouTubeVideoIDsFileURL),
+              let ids = try? JSONDecoder().decode([String].self, from: data)
+        else { return }
+        likedYouTubeVideoIDs = Set(ids)
     }
 
     // MARK: - Metadata
@@ -265,6 +297,16 @@ final class AudioLibrary: ObservableObject {
             saveMetaCache(updatedCache)
 
             self.tracks = results.sorted { $0.index < $1.index }.map { $0.track }
+
+            // Prune stale track IDs from all playlists
+            let validIDs = Set(self.tracks.map { $0.id })
+            var playlistsChanged = false
+            for index in playlists.indices {
+                let before = playlists[index].trackIDs.count
+                playlists[index].trackIDs.formIntersection(validIDs)
+                if playlists[index].trackIDs.count != before { playlistsChanged = true }
+            }
+            if playlistsChanged { savePlaylists() }
 
         } catch {
             print("AudioLibrary load error: \(error)")

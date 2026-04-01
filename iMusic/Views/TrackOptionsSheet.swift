@@ -222,15 +222,16 @@ private struct EditTrackSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") {
+                    Button(action: {
                         library.updateTrackMetadata(
                             track,
                             title: titleText,
                             artist: artistText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : artistText
                         )
                         dismiss()
+                    }) {
+                        Text("Save").fontWeight(.semibold)
                     }
-                    .fontWeight(.semibold)
                     .disabled(titleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
