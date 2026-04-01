@@ -9,6 +9,9 @@ private struct SavedTrackRow: View {
     @ObservedObject var library: AudioLibrary
     let onTap: () -> Void
     let onDelete: () -> Void
+    let onAddToQueue: () -> Void
+
+    @EnvironmentObject private var player: AudioPlayer
 
     @State private var showingOptions = false
 
@@ -38,9 +41,15 @@ private struct SavedTrackRow: View {
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
-            .confirmationDialog("", isPresented: $showingOptions, titleVisibility: .hidden) {
-                Button("Delete", role: .destructive) { onDelete() }
-                Button("Cancel", role: .cancel) {}
+            .sheet(isPresented: $showingOptions) {
+                TrackOptionsSheet(
+                    track: track,
+                    playlistContext: nil,
+                    onAddToQueue: onAddToQueue,
+                    onDelete: onDelete,
+                    onRemoveFromPlaylist: nil,
+                    library: library
+                )
             }
         }
         .contentShape(Rectangle())
@@ -216,6 +225,10 @@ struct SavedSongsView: View {
                             onDelete: {
                                 if player.currentTrack?.id == track.id { player.stop() }
                                 Task { await library.deleteTrack(track) }
+                            },
+                            onAddToQueue: {
+                                player.addToQueue(track)
+                                showToast(.success("Added to queue"))
                             }
                         )
                         .id(track.id)

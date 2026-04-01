@@ -265,10 +265,20 @@ struct PlaylistDetailView: View {
         PlaylistTrackRow(
             track: track,
             isCurrent: player.currentTrack?.id == track.id,
+            playlist: playlist,
+            library: library,
             onTap: { player.play(track: track, queue: tracksInPlaylist, playlistName: playlist.name) },
             onRemove: {
                 library.removeTrack(track, from: playlist)
                 showToast(.success("Removed from playlist"))
+            },
+            onAddToQueue: {
+                player.addToQueue(track)
+                showToast(.success("Added to queue"))
+            },
+            onDelete: {
+                if player.currentTrack?.id == track.id { player.stop() }
+                Task { await library.deleteTrack(track) }
             }
         )
     }
@@ -289,8 +299,14 @@ struct PlaylistDetailView: View {
 private struct PlaylistTrackRow: View {
     let track: Track
     let isCurrent: Bool
+    let playlist: Playlist
+    @ObservedObject var library: AudioLibrary
     let onTap: () -> Void
     let onRemove: () -> Void
+    let onAddToQueue: () -> Void
+    let onDelete: () -> Void
+
+    @EnvironmentObject private var player: AudioPlayer
 
     @State private var showingOptions = false
 
@@ -320,9 +336,15 @@ private struct PlaylistTrackRow: View {
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
-            .confirmationDialog("", isPresented: $showingOptions, titleVisibility: .hidden) {
-                Button("Remove from Playlist", role: .destructive) { onRemove() }
-                Button("Cancel", role: .cancel) {}
+            .sheet(isPresented: $showingOptions) {
+                TrackOptionsSheet(
+                    track: track,
+                    playlistContext: playlist,
+                    onAddToQueue: onAddToQueue,
+                    onDelete: onDelete,
+                    onRemoveFromPlaylist: onRemove,
+                    library: library
+                )
             }
         }
         .contentShape(Rectangle())

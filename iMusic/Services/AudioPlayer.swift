@@ -110,6 +110,23 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         if !isShuffled { originalQueue = playlistQueue }
     }
 
+    /// Appends a track immediately after the current position in the local queue.
+    /// If nothing is playing yet the track is placed at the front so it plays next.
+    /// No-op for YouTube queues — there is no local queue to append to.
+    func addToQueue(_ track: Track) {
+        guard youtubeQueue.isEmpty else { return }
+        let insertionIndex = currentIndex + 1
+        if playlistQueue.isEmpty {
+            // Nothing queued yet — seed the queue with this track
+            originalQueue = [track]
+            playlistQueue = [track]
+            currentIndex  = 0
+        } else {
+            playlistQueue.insert(track, at: min(insertionIndex, playlistQueue.count))
+            originalQueue.insert(track, at: min(insertionIndex, originalQueue.count))
+        }
+    }
+
     func moveUpcomingYouTubeTrack(from source: IndexSet, to destination: Int) {
         let offset = youtubeIndex + 1
         let adjustedSource = IndexSet(source.map { $0 + offset })

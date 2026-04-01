@@ -11,6 +11,7 @@ final class AudioLibrary: ObservableObject {
 
     @Published private(set) var tracks: [Track] = []
     @Published var playlists: [Playlist] = []
+    @Published private(set) var likedTrackIDs: Set<UUID> = []
 
     private let fileManager = FileManager.default
 
@@ -21,8 +22,14 @@ final class AudioLibrary: ObservableObject {
         return docs.appendingPathComponent("playlists.json")
     }
 
+    private var likedTrackIDsFileURL: URL {
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appendingPathComponent("liked_tracks.json")
+    }
+
     init() {
         loadPlaylists()
+        loadLikedTrackIDs()
         Task { await loadExistingTracks() }
     }
 
@@ -75,6 +82,64 @@ final class AudioLibrary: ObservableObject {
         guard let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
         playlists[index].name = newName
         savePlaylists()
+    }
+
+    // MARK: - Liked Tracks
+
+    func isLiked(_ track: Track) -> Bool {
+        likedTrackIDs.contains(track.id)
+    }
+
+    func toggleLike(_ track: Track) {
+        if likedTrackIDs.contains(track.id) {
+            likedTrackIDs.remove(track.id)
+        } else {
+            likedTrackIDs.insert(track.id)
+        }
+        saveLikedTrackIDs()
+    }
+
+    private func saveLikedTrackIDs() {
+        guard let data = try? JSONEncoder().encode(Array(likedTrackIDs)) else { return }
+        try? data.write(to: likedTrackIDsFileURL, options: .atomic)
+    }
+
+    private func loadLikedTrackIDs() {
+        guard let data = try? Data(contentsOf: likedTrackIDsFileURL),
+              let ids = try? JSONDecoder().decode([UUID].self, from: data)
+        else { return }
+        likedTrackIDs = Set(ids)
+    }
+
+    // MARK: - Metadata
+
+    /// Overwrites the cached title and artist for a local track, then rebuilds
+    /// the in-memory track list so every view picks up the change immediately.
+    /// AVFoundation tags on the file itself are *not* modified — only the app's
+    /// metadata cache, which is what drives display everywhere in the app.
+    func updateTrackMetadata(_ track: Track, title: String, artist: String?) {
+        let path = track.url.path
+        var cache = loadMetaCache()
+        guard let existing = cache[path] else { return }
+        cache[path] = CachedMeta(
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? track.title : title.trimmingCharacters(in: .whitespacesAndNewlines),
+            artist: artist?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? artist?.trimmingCharacters(in: .whitespacesAndNewlines) : nil,
+            album: existing.album,
+            duration: existing.duration,
+            modDate: existing.modDate
+        )
+        saveMetaCache(cache)
+        // Rebuild the in-memory track array with the updated metadata
+        tracks = tracks.map { t in
+            guard t.id == track.id else { return t }
+            return Track(
+                url: t.url,
+                title: cache[path]!.title,
+                artist: cache[path]!.artist,
+                album: cache[path]!.album,
+                duration: cache[path]!.duration
+            )
+        }
     }
 
     func deleteTrack(_ track: Track) async {
