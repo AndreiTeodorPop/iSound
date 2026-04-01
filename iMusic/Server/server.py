@@ -51,12 +51,12 @@ _FORMAT_FALLBACKS = [
 
 
 class _QuietLogger:
-    """Suppress yt-dlp warnings (PO Token noise, signature warnings, etc).
-    Errors are still printed so real failures are visible."""
+    """Fully silent yt-dlp logger — yt-dlp failures are expected and handled
+    by the Invidious fallback, so we don't need noise in the console."""
     def debug(self, msg): pass
     def info(self, msg): pass
     def warning(self, msg): pass
-    def error(self, msg): print(msg, flush=True)
+    def error(self, msg): pass
 
 
 def _fetch_info_with_retry(video_id, max_retries=3):
@@ -115,10 +115,12 @@ def _fetch_info_invidious(video_id):
                 headers={"User-Agent": "iMusic/1.0"},
                 timeout=8,
             )
+            print(f"[Invidious] {base} → HTTP {r.status_code}", flush=True)
             if r.status_code != 200:
                 continue
             data = r.json()
             if "error" in data:
+                print(f"[Invidious] {base} → API error: {data['error']}", flush=True)
                 continue
 
             # Prefer adaptive audio-only formats; fall back to muxed streams
@@ -127,13 +129,16 @@ def _fetch_info_invidious(video_id):
             if not audio:
                 audio = formats
             if not audio:
+                print(f"[Invidious] {base} → no formats found", flush=True)
                 continue
 
             best = max(audio, key=lambda f: int(f.get("bitrate", 0)))
             url = best.get("url")
             if not url:
+                print(f"[Invidious] {base} → best format has no url", flush=True)
                 continue
 
+            print(f"[Invidious] {base} → OK", flush=True)
             return {
                 "url":      url,
                 "title":    data.get("title", ""),
@@ -141,7 +146,8 @@ def _fetch_info_invidious(video_id):
                 "duration": int(data.get("lengthSeconds", 0)),
                 "expires":  time.time() + CACHE_TTL,
             }
-        except Exception:
+        except Exception as e:
+            print(f"[Invidious] {base} → exception: {e}", flush=True)
             continue
     return None
 
@@ -173,6 +179,7 @@ def _get_info(video_id):
         entry = _fetch_info_invidious(video_id)
 
     if not entry:
+        print(f"[iMusic] All sources failed for video {video_id}", flush=True)
         raise Exception("Could not fetch stream from YouTube or Invidious")
 
     with _cache_lock:
