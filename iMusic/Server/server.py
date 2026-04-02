@@ -64,13 +64,21 @@ def _fetch_info_with_retry(video_id, max_retries=3):
     last_err = None
 
     for clients, use_cookies in _CLIENT_PROFILES:
+        # Skip fetching the main YouTube webpage (most rate-limited endpoint).
+        # With cookies, go straight to innertube. Without cookies + ios client,
+        # also skip JS so we rely on pre-signed HLS URLs that need no decryption.
+        player_skip = ["webpage"] if use_cookies else ["webpage", "configs", "js"]
+
         base_opts = {
             "quiet": True,
             "logger": _QuietLogger(),
             "cachedir": YTDLP_CACHE_DIR,
             "nocheckcertificate": True,
             "extractor_args": {
-                "youtube": {"player_client": clients}
+                "youtube": {
+                    "player_client": clients,
+                    "player_skip": player_skip,
+                }
             },
         }
         if use_cookies and os.path.exists(COOKIES_FILE):
@@ -96,60 +104,27 @@ def _fetch_info_with_retry(video_id, max_retries=3):
     raise last_err
 
 
-# Invidious public instances — tried in order when yt-dlp fails.
-# These run their own extraction and return pre-solved YouTube stream URLs.
-_INVIDIOUS_INSTANCES = [
-    "https://inv.nadeko.net",
-    "https://invidious.fdn.fr",
-    "https://yt.drgnz.club",
-    "https://invidious.privacyredirect.com",
-]
-
-
-def _fetch_info_invidious(video_id):
-    """Fetch stream URL from Invidious API (no signature solving required)."""
-    for base in _INVIDIOUS_INSTANCES:
-        try:
-            r = http_requests.get(
-                f"{base}/api/v1/videos/{video_id}",
-                headers={"User-Agent": "iMusic/1.0"},
-                timeout=8,
-            )
-            print(f"[Invidious] {base} → HTTP {r.status_code}", flush=True)
-            if r.status_code != 200:
-                continue
-            data = r.json()
-            if "error" in data:
-                print(f"[Invidious] {base} → API error: {data['error']}", flush=True)
-                continue
-
-            # Prefer adaptive audio-only formats; fall back to muxed streams
-            formats = data.get("adaptiveFormats", []) + data.get("formatStreams", [])
-            audio = [f for f in formats if "audio" in f.get("type", "") and "video" not in f.get("type", "")]
-            if not audio:
-                audio = formats
-            if not audio:
-                print(f"[Invidious] {base} → no formats found", flush=True)
-                continue
-
-            best = max(audio, key=lambda f: int(f.get("bitrate", 0)))
-            url = best.get("url")
-            if not url:
-                print(f"[Invidious] {base} → best format has no url", flush=True)
-                continue
-
-            print(f"[Invidious] {base} → OK", flush=True)
-            return {
-                "url":      url,
-                "title":    data.get("title", ""),
-                "artist":   data.get("author", ""),
-                "duration": int(data.get("lengthSeconds", 0)),
-                "expires":  time.time() + CACHE_TTL,
-            }
-        except Exception as e:
-            print(f"[Invidious] {base} → exception: {e}", flush=True)
-            continue
-    return None
+def _fetch_info_pytubefix(video_id):
+    """Fallback extractor using pytubefix — independent Python implementation,
+    different HTTP patterns than yt-dlp, bypasses some rate-limit scenarios."""
+    try:
+        from pytubefix import YouTube
+        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
+        stream = yt.streams.filter(only_audio=True).order_by("abr").last()
+        if not stream:
+            stream = yt.streams.first()
+        if not stream:
+            return None
+        return {
+            "url":      stream.url,
+            "title":    yt.title or "",
+            "artist":   yt.author or "",
+            "duration": yt.length or 0,
+            "expires":  time.time() + CACHE_TTL,
+        }
+    except Exception as e:
+        print(f"[pytubefix] {e}", flush=True)
+        return None
 
 
 def _get_info(video_id):
@@ -174,9 +149,10 @@ def _get_info(video_id):
     except Exception:
         pass
 
-    # Fall back to Invidious (pre-solved URLs, works around rate-limited IPs)
+    # Fall back to pytubefix — independent Python extractor, different HTTP
+    # patterns than yt-dlp, often succeeds when yt-dlp is rate-limited.
     if not entry:
-        entry = _fetch_info_invidious(video_id)
+        entry = _fetch_info_pytubefix(video_id)
 
     if not entry:
         print(f"[iMusic] All sources failed for video {video_id}", flush=True)

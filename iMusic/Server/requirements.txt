@@ -1,6 +1,7 @@
 flask
 gunicorn
 yt-dlp
+pytubefix
 requests
 langdetect
 deep-translator
