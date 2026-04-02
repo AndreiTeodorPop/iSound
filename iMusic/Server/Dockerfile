@@ -19,7 +19,7 @@ COPY . .
 RUN pip install --no-cache-dir --quiet --root-user-action=ignore --upgrade pip && \
     pip install --no-cache-dir --quiet --root-user-action=ignore -r requirements.txt && \
     pip install --no-cache-dir --quiet --root-user-action=ignore --upgrade yt-dlp && \
-    bgutil-ytdlp-pot-provider install
+    python -m bgutil_ytdlp_pot_provider install
 
 # Persistent yt-dlp cache (stores the YouTube JS player so signature solving
 # works without re-downloading on every container restart).
