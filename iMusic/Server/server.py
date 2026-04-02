@@ -105,30 +105,48 @@ def _fetch_info_with_retry(video_id, max_retries=3):
 
 
 def _fetch_info_pytubefix(video_id):
-    """Fallback extractor using pytubefix — independent Python implementation,
-    different HTTP patterns than yt-dlp, bypasses some rate-limit scenarios."""
-    try:
-        from pytubefix import YouTube
-        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
-        # Prefer AAC/m4a — natively supported by iOS AVPlayer.
-        # opus/webm may also be returned but iOS can't play it.
-        stream = yt.streams.filter(only_audio=True, mime_type="audio/mp4").order_by("abr").last()
-        if not stream:
-            stream = yt.streams.filter(only_audio=True).order_by("abr").last()
-        if not stream:
-            stream = yt.streams.first()
-        if not stream:
-            return None
-        return {
-            "url":      stream.url,
-            "title":    yt.title or "",
-            "artist":   yt.author or "",
-            "duration": yt.length or 0,
-            "expires":  time.time() + CACHE_TTL,
-        }
-    except Exception as e:
-        print(f"[pytubefix] {e}", flush=True)
-        return None
+    """Fallback extractor using pytubefix with multiple clients.
+    Different clients use different API endpoints with different bot-detection
+    thresholds — we try them in order until one works."""
+    from pytubefix import YouTube
+
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    # Clients ordered by likelihood of bypassing bot detection on cloud IPs.
+    # ANDROID_VR / ANDROID_EMBED use endpoints that are less aggressively filtered.
+    _PYTUBEFIX_CLIENTS = [
+        "ANDROID_VR",
+        "ANDROID_EMBED",
+        "ANDROID_MUSIC",
+        "IOS",
+        "WEB_EMBED",
+        "WEB",
+    ]
+
+    for client in _PYTUBEFIX_CLIENTS:
+        try:
+            yt = YouTube(url, client=client)
+            # Prefer AAC/m4a — natively supported by iOS AVPlayer.
+            stream = yt.streams.filter(only_audio=True, mime_type="audio/mp4").order_by("abr").last()
+            if not stream:
+                stream = yt.streams.filter(only_audio=True).order_by("abr").last()
+            if not stream:
+                stream = yt.streams.first()
+            if not stream:
+                continue
+            print(f"[pytubefix/{client}] OK", flush=True)
+            return {
+                "url":      stream.url,
+                "title":    yt.title or "",
+                "artist":   yt.author or "",
+                "duration": yt.length or 0,
+                "expires":  time.time() + CACHE_TTL,
+            }
+        except Exception as e:
+            print(f"[pytubefix/{client}] {e}", flush=True)
+            continue
+
+    return None
 
 
 def _get_info(video_id):
