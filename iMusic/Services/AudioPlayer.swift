@@ -261,6 +261,13 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
                    d.isNumeric, d.seconds > 0, self.duration == 0 {
                     self.duration = d.seconds
                 }
+                // Fallback: AVPlayerItemDidPlayToEndTime doesn't always fire for HTTP streams.
+                // If playback has gone 2 s past the reported duration, advance to next track.
+                if self.duration > 0, seconds > self.duration {
+                    self.stopStreamPlayer()
+                    self.isPlaying = false
+                    self.playNext()
+                }
             }
         }
     }
