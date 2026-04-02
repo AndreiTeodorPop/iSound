@@ -1,11 +1,12 @@
 import Foundation
+import NaturalLanguage
 
 struct LyricsResult {
     let original: String
     let translated: String?
     let language: String
 
-    var isEnglish: Bool { language == "en" || (translated == nil && language != "en") }
+    var isEnglish: Bool { language == "en" || language == "unknown" }
     var englishText: String { translated ?? original }
 }
 
@@ -156,10 +157,11 @@ actor LyricsService {
                   let resp    = json["response"] as? [String: Any],
                   let hits    = resp["hits"] as? [[String: Any]] else { return nil }
 
-            for hit in hits.prefix(3) {
+            for hit in hits.prefix(5) {
                 guard hit["type"] as? String == "song",
                       let result = hit["result"] as? [String: Any],
                       let path   = result["path"] as? String,
+                      path.hasSuffix("-lyrics"),          // only actual song lyrics pages
                       let pageUrl = URL(string: "https://genius.com\(path)") else { continue }
 
                 var pageReq = URLRequest(url: pageUrl)
@@ -171,12 +173,55 @@ actor LyricsService {
                 guard (pageResponse as? HTTPURLResponse)?.statusCode == 200,
                       let html = String(data: pageData, encoding: .utf8) else { continue }
 
-                if let lyrics = extractGeniusLyrics(from: html), !lyrics.isEmpty {
-                    return LyricsResult(original: lyrics, translated: nil, language: "unknown")
+                guard let raw = extractGeniusLyrics(from: html), !raw.isEmpty else { continue }
+
+                // Clean up: strip section markers [Verse 1], [Chorus], etc.
+                // and any line that looks like page metadata (contains "Contributors",
+                // or is an excessively long single line — descriptions, not lyrics)
+                let lines = raw.components(separatedBy: "\n").filter { line in
+                    let t = line.trimmingCharacters(in: .whitespaces)
+                    if t.isEmpty { return false }
+                    if t.hasPrefix("[") && t.hasSuffix("]") { return false }   // section markers
+                    if t.count > 200 { return false }                          // metadata paragraphs
+                    if t.localizedCaseInsensitiveContains("contributors") { return false }
+                    return true
                 }
+                let lyrics = lines.joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                // Require at least 3 non-empty lines — reject page metadata
+                guard lines.count >= 3 else { continue }
+
+                let lang = detectLanguage(lyrics)
+                var translated: String? = nil
+                if lang != "en" && lang != "unknown" {
+                    translated = await translateViaServer(text: lyrics, lang: lang)
+                }
+                return LyricsResult(original: lyrics, translated: translated, language: lang)
             }
         } catch {}
         return nil
+    }
+
+    /// Detects the dominant language of `text` using on-device NLP.
+    nonisolated private func detectLanguage(_ text: String) -> String {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(String(text.prefix(500)))
+        return recognizer.dominantLanguage?.rawValue ?? "unknown"
+    }
+
+    /// Asks the server to translate `text` from `lang` to English.
+    private func translateViaServer(text: String, lang: String) async -> String? {
+        guard let url = URL(string: "https://imusic-production-4e58.up.railway.app/translate") else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["text": text, "lang": lang])
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let result = json["translated"] as? String else { return nil }
+        return result
     }
 
     private func extractGeniusLyrics(from html: String) -> String? {

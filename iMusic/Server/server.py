@@ -512,20 +512,37 @@ def _fetch_from_genius(title, artist):
         if r.status_code != 200:
             return None
         hits = r.json().get("response", {}).get("hits", [])
-        for hit in hits[:3]:
+        for hit in hits[:5]:
             if hit.get("type") != "song":
                 continue
-            path = hit.get("result", {}).get("path", "")
-            if not path:
+            result = hit.get("result", {})
+            path = result.get("path", "")
+            # Only fetch actual song lyrics pages (paths end with "-lyrics")
+            if not path or not path.endswith("-lyrics"):
                 continue
             page = http_requests.get(f"https://genius.com{path}", headers=headers, timeout=15)
             if page.status_code != 200:
                 continue
             parser = _GeniusParser()
             parser.feed(page.text)
-            text = parser.lyrics()
-            if text:
-                return text
+            raw = parser.lyrics()
+            if not raw:
+                continue
+            # Strip section markers and validate — reject metadata/descriptions
+            clean_lines = []
+            for line in raw.split('\n'):
+                t = line.strip()
+                if not t:
+                    continue
+                if t.startswith('[') and t.endswith(']'):
+                    continue  # [Verse 1], [Chorus], etc.
+                if len(t) > 200:
+                    continue  # metadata paragraphs, not lyrics
+                if 'contributors' in t.lower():
+                    continue
+                clean_lines.append(t)
+            if len(clean_lines) >= 3:
+                return '\n'.join(clean_lines)
     except Exception as e:
         print(f"Genius error: {e}")
     return None
@@ -603,6 +620,23 @@ def lyrics_route():
         _lyrics_cache[cache_key] = {"data": result, "expires": now + LYRICS_CACHE_TTL}
 
     return jsonify(result)
+
+
+@app.route("/translate", methods=["POST"])
+def translate_route():
+    """Translate arbitrary text to English. Used by the iOS client when it fetches
+    lyrics from a third-party source (e.g. Genius) and needs translation."""
+    body = request.get_json(silent=True) or {}
+    text = body.get("text", "").strip()
+    lang = body.get("lang", "").strip()
+    if not text or not lang or lang == "en":
+        return jsonify({"error": "missing or invalid parameters"}), 400
+
+    translated = _translate_to_english(text, lang)
+    if not translated:
+        return jsonify({"error": "Translation failed"}), 500
+
+    return jsonify({"translated": translated})
 
 
 if __name__ == "__main__":
