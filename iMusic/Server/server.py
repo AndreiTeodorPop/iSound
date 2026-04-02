@@ -110,7 +110,11 @@ def _fetch_info_pytubefix(video_id):
     try:
         from pytubefix import YouTube
         yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
-        stream = yt.streams.filter(only_audio=True).order_by("abr").last()
+        # Prefer AAC/m4a — natively supported by iOS AVPlayer.
+        # opus/webm may also be returned but iOS can't play it.
+        stream = yt.streams.filter(only_audio=True, mime_type="audio/mp4").order_by("abr").last()
+        if not stream:
+            stream = yt.streams.filter(only_audio=True).order_by("abr").last()
         if not stream:
             stream = yt.streams.first()
         if not stream:
@@ -194,12 +198,25 @@ def proxy():
         entry = _get_info(video_id)
         yt_url = entry["url"]
 
-        headers = {"User-Agent": "Mozilla/5.0"}
+        print(f"[proxy] {video_id} → {yt_url[:80]}...", flush=True)
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "Accept": "*/*",
+            "Accept-Encoding": "identity",  # avoid compressed responses
+        }
         range_header = request.headers.get("Range")
         if range_header:
             headers["Range"] = range_header
 
         r = http_requests.get(yt_url, headers=headers, stream=True, timeout=30)
+        print(f"[proxy] {video_id} → HTTP {r.status_code} {r.headers.get('Content-Type', '?')}", flush=True)
+
+        if r.status_code not in (200, 206):
+            # Invalidate cache so the next request fetches a fresh URL
+            with _cache_lock:
+                _cache.pop(video_id, None)
+            return jsonify({"error": f"upstream returned {r.status_code}"}), 502
 
         response_headers = {
             "Content-Type":   r.headers.get("Content-Type", "audio/mp4"),
@@ -235,6 +252,7 @@ def download():
     info = None
 
     for clients, use_cookies in _CLIENT_PROFILES:
+        player_skip = ["webpage"] if use_cookies else ["webpage", "configs", "js"]
         dl_base = {
             "quiet": True,
             "logger": _QuietLogger(),
@@ -248,7 +266,10 @@ def download():
             "keepvideo": False,
             "nocheckcertificate": True,
             "extractor_args": {
-                "youtube": {"player_client": clients}
+                "youtube": {
+                    "player_client": clients,
+                    "player_skip": player_skip,
+                }
             },
             **({"ffmpeg_location": FFMPEG_DIR} if FFMPEG_DIR else {}),
         }
@@ -265,8 +286,9 @@ def download():
                 last_err = e
                 err_str = str(e)
                 if "Requested format is not available" in err_str or \
-                   "Only images are available" in err_str:
-                    continue  # try next format
+                   "Only images are available" in err_str or \
+                   "Sign in to confirm" in err_str:
+                    break  # this profile won't work, try next
                 raise  # unexpected error — surface immediately
 
         if info is not None:

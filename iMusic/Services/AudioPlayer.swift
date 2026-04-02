@@ -217,12 +217,18 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
         updateNowPlayingInfo()
 
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
             do {
                 let isPlayable = try await asset.load(.isPlayable)
                 if !isPlayable { print("Asset not playable: \(url)") }
             } catch {
                 print("Asset load error: \(error)")
+            }
+            // Load real duration from the asset — server may return 0 when
+            // metadata extraction was skipped (player_skip / pytubefix).
+            if let d = try? await asset.load(.duration), d.isNumeric, d.seconds > 1 {
+                self?.duration = d.seconds
+                self?.updateNowPlayingInfo()
             }
         }
     }
