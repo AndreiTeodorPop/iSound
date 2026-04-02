@@ -18,8 +18,7 @@ COPY . .
 # caching never leaves an outdated yt-dlp (YouTube breaks old versions quickly).
 RUN pip install --no-cache-dir --quiet --root-user-action=ignore --upgrade pip && \
     pip install --no-cache-dir --quiet --root-user-action=ignore -r requirements.txt && \
-    pip install --no-cache-dir --quiet --root-user-action=ignore --upgrade yt-dlp && \
-    python -m bgutil_ytdlp_pot_provider install
+    pip install --no-cache-dir --quiet --root-user-action=ignore --upgrade yt-dlp
 
 # Persistent yt-dlp cache (stores the YouTube JS player so signature solving
 # works without re-downloading on every container restart).
