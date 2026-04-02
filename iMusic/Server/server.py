@@ -109,28 +109,120 @@ def _fetch_info_with_retry(video_id, max_retries=3):
     raise last_err
 
 
+def _fetch_via_innertube(video_id):
+    """Direct InnerTube API extraction — bypasses pytubefix entirely.
+    Uses raw HTTP requests with a minimal fingerprint, trying several clients
+    that are less aggressively filtered than web/android on cloud IPs."""
+
+    # Client configs ordered by likelihood of bypassing bot detection.
+    # TVHTML5_SIMPLY_EMBEDDED_PLAYER is an embedded player client rarely flagged.
+    _CLIENTS = [
+        {
+            "name": "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
+            "context": {
+                "clientName": "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
+                "clientVersion": "2.0",
+                "hl": "en", "timeZone": "UTC", "utcOffsetMinutes": 0,
+            },
+            "user_agent": "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/6.0 TV Safari/538.1",
+        },
+        {
+            "name": "ANDROID_VR",
+            "context": {
+                "clientName": "ANDROID_VR",
+                "clientVersion": "1.56.21",
+                "androidSdkVersion": 30,
+                "userAgent": "com.google.android.apps.youtube.vr.oculus/1.56.21 (Linux; U; Android 10; GB) gzip",
+                "hl": "en", "timeZone": "UTC", "utcOffsetMinutes": 0,
+            },
+            "user_agent": "com.google.android.apps.youtube.vr.oculus/1.56.21 (Linux; U; Android 10; GB) gzip",
+        },
+        {
+            "name": "IOS",
+            "context": {
+                "clientName": "IOS",
+                "clientVersion": "19.45.4",
+                "deviceModel": "iPhone16,2",
+                "userAgent": "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
+                "hl": "en", "timeZone": "UTC", "utcOffsetMinutes": 0,
+            },
+            "user_agent": "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
+        },
+    ]
+
+    for client in _CLIENTS:
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": client["user_agent"],
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+            body = {
+                "videoId": video_id,
+                "contentCheckOk": True,
+                "racyCheckOk": True,
+                "context": {"client": client["context"]},
+            }
+            r = http_requests.post(
+                "https://www.youtube.com/youtubei/v1/player",
+                json=body, headers=headers, timeout=15,
+            )
+            if r.status_code != 200:
+                print(f"[innertube/{client['name']}] HTTP {r.status_code}", flush=True)
+                continue
+
+            data = r.json()
+            ps = data.get("playabilityStatus", {})
+            if ps.get("status") != "OK":
+                print(f"[innertube/{client['name']}] {ps.get('reason', ps.get('status', '?'))}", flush=True)
+                continue
+
+            details  = data.get("videoDetails", {})
+            title    = details.get("title", "")
+            artist   = details.get("author", "")
+            duration = int(details.get("lengthSeconds", 0))
+
+            formats = data.get("streamingData", {}).get("adaptiveFormats", [])
+            audio   = [f for f in formats if f.get("mimeType", "").startswith("audio/")]
+            m4a     = [f for f in audio   if f.get("mimeType", "").startswith("audio/mp4")]
+            pool    = m4a if m4a else audio
+
+            if not pool:
+                print(f"[innertube/{client['name']}] no audio formats", flush=True)
+                continue
+
+            best = max(pool, key=lambda f: f.get("bitrate", 0))
+            stream_url = best.get("url")
+            if not stream_url:
+                print(f"[innertube/{client['name']}] cipher-protected, skipping", flush=True)
+                continue
+
+            print(f"[innertube/{client['name']}] OK", flush=True)
+            return {
+                "url":     stream_url,
+                "title":   title,
+                "artist":  artist,
+                "duration": duration,
+                "expires": time.time() + CACHE_TTL,
+            }
+        except Exception as e:
+            print(f"[innertube/{client['name']}] {e}", flush=True)
+            continue
+
+    return None
+
+
 def _fetch_info_pytubefix(video_id):
-    """Fallback extractor using pytubefix with multiple clients.
-    Different clients use different API endpoints with different bot-detection
-    thresholds — we try them in order until one works."""
+    """Fallback extractor using pytubefix with multiple clients."""
     from pytubefix import YouTube
 
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # ANDROID_VR is the only client that reliably bypasses bot detection on cloud IPs.
-    # Other clients (TV_EMBED=429, WEB/ANDROID_VR_BOT=bot detected, IOS=400,
-    # WEB_EMBED=unavailable, ANDROID_MUSIC=login required) are kept as fallbacks.
-    _PYTUBEFIX_CLIENTS = [
-        "ANDROID_VR",
-        "ANDROID_MUSIC",
-        "WEB_EMBED",
-        "WEB",
-    ]
+    _PYTUBEFIX_CLIENTS = ["ANDROID_VR", "ANDROID_MUSIC", "WEB_EMBED", "WEB"]
 
     for client in _PYTUBEFIX_CLIENTS:
         try:
             yt = YouTube(url, client=client)
-            # Prefer AAC/m4a — natively supported by iOS AVPlayer.
             stream = yt.streams.filter(only_audio=True, mime_type="audio/mp4").order_by("abr").last()
             if not stream:
                 stream = yt.streams.filter(only_audio=True).order_by("abr").last()
@@ -162,21 +254,24 @@ def _get_info(video_id):
 
     entry = None
 
-    # Try yt-dlp first (best quality when the server IP is not rate-limited)
-    try:
-        info = _fetch_info_with_retry(video_id)
-        entry = {
-            "url":      info["url"],
-            "title":    info.get("title", ""),
-            "artist":   info.get("uploader", ""),
-            "duration": info.get("duration", 0),
-            "expires":  now + CACHE_TTL,
-        }
-    except Exception:
-        pass
+    # 1. Raw InnerTube API — minimal HTTP fingerprint, tries embedded/VR/iOS clients
+    entry = _fetch_via_innertube(video_id)
 
-    # Fall back to pytubefix — independent Python extractor, different HTTP
-    # patterns than yt-dlp, often succeeds when yt-dlp is rate-limited.
+    # 2. yt-dlp with bgutil PO token provider
+    if not entry:
+        try:
+            info = _fetch_info_with_retry(video_id)
+            entry = {
+                "url":      info["url"],
+                "title":    info.get("title", ""),
+                "artist":   info.get("uploader", ""),
+                "duration": info.get("duration", 0),
+                "expires":  now + CACHE_TTL,
+            }
+        except Exception:
+            pass
+
+    # 3. pytubefix
     if not entry:
         entry = _fetch_info_pytubefix(video_id)
 
@@ -266,9 +361,8 @@ def download():
     if not video_id:
         return jsonify({"error": "missing id"}), 400
 
-    # yt-dlp always fails with bot detection on this server IP.
-    # Go straight to pytubefix to get the direct CDN audio URL.
-    info = _fetch_info_pytubefix(video_id)
+    # Try raw InnerTube first, then pytubefix as fallback.
+    info = _fetch_via_innertube(video_id) or _fetch_info_pytubefix(video_id)
     if not info:
         return jsonify({"error": "Could not fetch audio URL"}), 500
 

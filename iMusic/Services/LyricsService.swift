@@ -30,13 +30,9 @@ actor LyricsService {
     ///   "Something - Topic" → "Something"
     nonisolated func cleanTitle(_ title: String) -> String {
         // Parenthesized / bracketed suffixes to strip (case-insensitive).
-        // The pattern matches an opening paren or bracket, the keyword phrase,
-        // optional extra words, and the matching closing delimiter.
         let suffixPattern = #"[\(\[]\s*(?:official\s+(?:music\s+)?(?:lyric\s+)?(?:audio\s+)?video|official\s+audio|official\s+lyric\s+video|music\s+video|lyric(?:s)?\s+video|lyrics|audio|hd|hq|4k|live\s+(?:performance|session|version)?|live|explicit|clean|version|visualizer|remaster(?:ed)?|feat\.?[^)\]]*)\s*[\)\]]"#
 
         var result = title
-        // Repeatedly strip suffix tokens — a title may have more than one,
-        // e.g. "Song (Official Video) (HD)".
         let regex = try? NSRegularExpression(pattern: suffixPattern, options: .caseInsensitive)
         var prev = ""
         while result != prev {
@@ -55,6 +51,13 @@ actor LyricsService {
             result = result.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
+        // Strip bare "ft. Artist" / "feat. Artist" not enclosed in parens/brackets.
+        if let range = result.range(of: #"\s+(?:ft\.?|feat\.?)\s+.+$"#,
+                                    options: [.regularExpression, .caseInsensitive]) {
+            result.removeSubrange(range)
+            result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
         return result
     }
 
@@ -65,17 +68,26 @@ actor LyricsService {
         let cleanedTitle = cleanTitle(title)
         let resolvedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Only attempt a split when we have no useful artist value.
-        if resolvedArtist.isEmpty, let dashRange = cleanedTitle.range(of: " - ") {
+        // Always attempt "Artist - Title" split — YouTube titles routinely embed the
+        // artist name this way, and the artist field is often a channel name (50CentVEVO)
+        // that lyrics APIs won't recognise. The embedded name is more reliable.
+        if let dashRange = cleanedTitle.range(of: " - ") {
             let left  = String(cleanedTitle[cleanedTitle.startIndex..<dashRange.lowerBound])
                             .trimmingCharacters(in: .whitespacesAndNewlines)
             let right = String(cleanedTitle[dashRange.upperBound...])
                             .trimmingCharacters(in: .whitespacesAndNewlines)
-            // YouTube convention is "Artist - Title"; use that ordering.
-            return (title: right, artist: left)
+            if !left.isEmpty && !right.isEmpty {
+                return (title: right, artist: left)
+            }
         }
 
-        return (title: cleanedTitle, artist: resolvedArtist)
+        // No "Artist - Title" pattern — strip VEVO/channel suffixes from the artist field.
+        let cleanedArtist = resolvedArtist
+            .replacingOccurrences(of: #"(?i)(vevo|official|music|records?|tv|channel|entertainment)$"#,
+                                  with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return (title: cleanedTitle, artist: cleanedArtist.isEmpty ? resolvedArtist : cleanedArtist)
     }
 
     func fetch(title: String, artist: String) async -> LyricsResult? {
