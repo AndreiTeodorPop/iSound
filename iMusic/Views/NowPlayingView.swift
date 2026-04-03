@@ -408,6 +408,13 @@ private struct LyricsFullScreenView: View {
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
+                                if let src = r.source {
+                                    Text("Source: \(src)")
+                                        .font(.footnote.bold())
+                                        .foregroundStyle(.white.opacity(0.5))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.top, 8)
+                                }
                             }
                             .padding(.horizontal, 20)
                             .padding(.bottom, 40)

@@ -5,6 +5,7 @@ struct LyricsResult {
     let original: String
     let translated: String?
     let language: String
+    let source: String?
 
     var isEnglish: Bool { language == "en" || language == "unknown" }
     var englishText: String { translated ?? original }
@@ -133,7 +134,8 @@ actor LyricsService {
             return LyricsResult(
                 original:   decoded.lyrics,
                 translated: decoded.translated,
-                language:   decoded.language
+                language:   decoded.language,
+                source:     decoded.source
             )
         } catch {
             return nil
@@ -196,7 +198,7 @@ actor LyricsService {
                 // NLLanguageRecognizer for mixed-language lyrics like French rap).
                 let (translated, detectedLang) = await translateViaServer(text: lyrics)
                 let lang = detectedLang ?? detectLanguage(lyrics)
-                return LyricsResult(original: lyrics, translated: translated, language: lang)
+                return LyricsResult(original: lyrics, translated: translated, language: lang, source: "Genius")
             }
         } catch {}
         return nil
@@ -292,7 +294,7 @@ actor LyricsService {
             let decoded = try JSONDecoder().decode(OvhResponse.self, from: data)
             let lyrics = decoded.lyrics.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !lyrics.isEmpty else { return nil }
-            return LyricsResult(original: lyrics, translated: nil, language: "en")
+            return LyricsResult(original: lyrics, translated: nil, language: "en", source: "lyrics.ovh")
         } catch {
             return nil
         }
@@ -314,7 +316,7 @@ actor LyricsService {
             guard (response as? HTTPURLResponse)?.statusCode == 200,
                   let html = String(data: data, encoding: .utf8) else { return nil }
             guard let lyrics = extractAZLyricsText(from: html), !lyrics.isEmpty else { return nil }
-            return LyricsResult(original: lyrics, translated: nil, language: "en")
+            return LyricsResult(original: lyrics, translated: nil, language: "en", source: "AZLyrics")
         } catch {
             return nil
         }
@@ -426,6 +428,7 @@ actor LyricsService {
         let lyrics: String
         let translated: String?
         let language: String
+        let source: String?
     }
 
     private struct OvhResponse: Decodable {
