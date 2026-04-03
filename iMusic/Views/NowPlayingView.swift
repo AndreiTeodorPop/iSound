@@ -384,52 +384,67 @@ private struct LyricsFullScreenView: View {
                             .tint(.white)
                             .scaleEffect(1.4)
                         Spacer()
-                    } else if let lines = syncedLines, !lines.isEmpty {
-                        SyncedLyricsScrollView(
-                            lines: lines,
-                            activeIndex: activeLineIndex,
-                            userIsScrolling: $userIsScrolling,
-                            onTap: { line in
-                                player.seek(to: line.timestamp)
-                            }
-                        )
+                    } else if let lines = syncedLines, !lines.isEmpty,
+                              !(showTranslated && plainResult?.translated != nil) {
+                        // Show synced only when NOT switched to translated view
+                        VStack(spacing: 0) {
+                            SyncedLyricsScrollView(
+                                lines: lines,
+                                activeIndex: activeLineIndex,
+                                userIsScrolling: $userIsScrolling,
+                                onTap: { line in
+                                    player.seek(to: line.timestamp)
+                                }
+                            )
+                            let syncSource = plainResult?.source ?? "LrcLib"
+                            Text("Source: \(syncSource)")
+                                .font(.footnote.bold())
+                                .foregroundStyle(.white.opacity(0.5))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 20)
+                                .padding(.top, 4)
+                        }
                     } else if let r = plainResult {
                         let displayText = showTranslated ? r.englishText : r.original
                         let lines = displayText
                             .components(separatedBy: "\n")
                             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
 
-                        ScrollView(showsIndicators: false) {
-                            VStack(alignment: .leading, spacing: 18) {
-                                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                                    Text(line)
-                                        .font(.title2.bold())
-                                        .foregroundStyle(.white)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .fixedSize(horizontal: false, vertical: true)
+                        VStack(spacing: 0) {
+                            ScrollView(showsIndicators: false) {
+                                VStack(alignment: .leading, spacing: 18) {
+                                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                                        Text(line)
+                                            .font(.title2.bold())
+                                            .foregroundStyle(.white)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
                                 }
-                                if let src = r.source {
-                                    Text("Source: \(src)")
-                                        .font(.footnote.bold())
-                                        .foregroundStyle(.white.opacity(0.5))
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.top, 8)
-                                }
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 20)
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 40)
+                            .mask(
+                                VStack(spacing: 0) {
+                                    Rectangle()
+                                    LinearGradient(
+                                        colors: [.black, .clear],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                    .frame(height: 80)
+                                }
+                            )
+
+                            if let src = r.source {
+                                Text("Source: \(src)")
+                                    .font(.footnote.bold())
+                                    .foregroundStyle(.white.opacity(0.5))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 6)
+                            }
                         }
-                        .mask(
-                            VStack(spacing: 0) {
-                                Rectangle()
-                                LinearGradient(
-                                    colors: [.black, .clear],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                                .frame(height: 80)
-                            }
-                        )
                     } else {
                         Spacer()
                         VStack(spacing: 12) {
@@ -447,7 +462,7 @@ private struct LyricsFullScreenView: View {
                 // MARK: Bottom Controls
                 VStack(spacing: 14) {
                     HStack {
-                        if let r = plainResult, syncedLines == nil {
+                        if let r = plainResult {
                             ShareLink(
                                 item: showTranslated ? r.englishText : r.original,
                                 subject: Text(track?.title ?? ""),
@@ -463,7 +478,7 @@ private struct LyricsFullScreenView: View {
 
                         Spacer()
 
-                        if let r = plainResult, syncedLines == nil, !r.isEnglish, r.translated != nil {
+                        if let r = plainResult, !r.isEnglish, r.translated != nil {
                             Button {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     showTranslated.toggle()

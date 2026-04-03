@@ -426,7 +426,7 @@ def _translate_to_english(text, src_lang):
         try:
             r = http_requests.get(
                 "https://translate.googleapis.com/translate_a/single",
-                params={"client": "gtx", "sl": src_lang, "tl": "en", "dt": "t", "q": chunk},
+                params={"client": "gtx", "sl": "auto", "tl": "en", "dt": "t", "q": chunk},
                 timeout=15,
             )
             if r.status_code == 200:
@@ -516,6 +516,13 @@ def _fetch_from_genius(title, artist):
         if r.status_code != 200:
             return None
         hits = r.json().get("response", {}).get("hits", [])
+
+        import unicodedata
+        def _norm(s):
+            return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode().lower()
+
+        title_words = [w for w in re.split(r'\W+', _norm(title)) if len(w) >= 3]
+
         for hit in hits[:5]:
             if hit.get("type") != "song":
                 continue
@@ -523,6 +530,10 @@ def _fetch_from_genius(title, artist):
             path = result.get("path", "")
             # Only fetch actual song lyrics pages (paths end with "-lyrics")
             if not path or not path.endswith("-lyrics"):
+                continue
+            # Verify hit title matches our song — prevents scraping wrong pages (release lists, etc.)
+            hit_title = _norm(result.get("title", ""))
+            if title_words and not any(w in hit_title for w in title_words):
                 continue
             page = http_requests.get(f"https://genius.com{path}", headers=headers, timeout=15)
             if page.status_code != 200:
@@ -573,27 +584,50 @@ def lyrics_route():
 
     # 1. lrclib.net (great for synced content)
     if not lyrics_text:
-        try:
-            r = http_requests.get(
-                "https://lrclib.net/api/search",
-                params={"track_name": title, "artist_name": artist_clean or title},
-                headers={"Lrclib-Client": "iMusic/1.0"},
-                timeout=10,
-            )
-            if r.status_code == 200:
-                items = r.json()
-                for item in items:
-                    text = item.get("plainLyrics", "").strip()
-                    if not text:
-                        synced = item.get("syncedLyrics", "").strip()
-                        if synced:
-                            text = re.sub(r'\[\d+:\d+\.\d+\]\s*', '', synced).strip()
-                    if text:
-                        lyrics_text = text
-                        source = "LrcLib"
-                        break
-        except Exception as e:
-            print(f"lrclib error: {e}")
+        def _lrclib_search(track_name, artist_name):
+            try:
+                params = {"track_name": track_name}
+                if artist_name:
+                    params["artist_name"] = artist_name
+                r = http_requests.get(
+                    "https://lrclib.net/api/search",
+                    params=params,
+                    headers={"Lrclib-Client": "iMusic/1.0"},
+                    timeout=10,
+                )
+                if r.status_code == 200:
+                    return r.json()
+            except Exception as e:
+                print(f"lrclib error: {e}")
+            return []
+
+        def _lrclib_extract(items):
+            for item in items:
+                text = item.get("plainLyrics", "").strip()
+                if not text:
+                    synced = item.get("syncedLyrics", "").strip()
+                    if synced:
+                        text = re.sub(r'\[\d+:\d+\.\d+\]\s*', '', synced).strip()
+                if text:
+                    return text
+            return None
+
+        items = _lrclib_search(title, artist_clean)
+        lyrics_text = _lrclib_extract(items)
+
+        # Retry: if no artist and title looks like "Artist SongTitle" (no dash separator),
+        # split on the last space and use left part as artist, right as track.
+        # Example: "いきものがかり ブルーバード" → artist="いきものがかり", track="ブルーバード"
+        if not lyrics_text and not artist_clean and ' ' in title:
+            last_space = title.rfind(' ')
+            retry_artist = title[:last_space].strip()
+            retry_title  = title[last_space+1:].strip()
+            if retry_artist and retry_title:
+                items2 = _lrclib_search(retry_title, retry_artist)
+                lyrics_text = _lrclib_extract(items2)
+
+        if lyrics_text:
+            source = "LrcLib"
 
     # 2. Fallback: lyrics.ovh
     if not lyrics_text:

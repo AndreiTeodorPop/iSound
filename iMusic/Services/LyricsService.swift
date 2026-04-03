@@ -97,12 +97,6 @@ actor LyricsService {
         let key = "\(cleanedArtist)|\(cleanedTitle)".lowercased()
         if let hit = cache[key] { return hit }
 
-        // Google first — real device IPs are not blocked
-        if let result = await fetchFromGoogle(title: cleanedTitle, artist: cleanedArtist) {
-            cache[key] = result
-            return result
-        }
-
         // Server: lrclib → lyrics.ovh → Genius (with translation)
         if let result = await fetchFromBackend(title: cleanedTitle, artist: cleanedArtist) {
             cache[key] = result
@@ -138,112 +132,23 @@ actor LyricsService {
             let (data, response) = try await URLSession.shared.data(from: url)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
             let decoded = try JSONDecoder().decode(PlainResponse.self, from: data)
+            var translated = decoded.translated
+            var language   = decoded.language
+            // If server returned no translation (old deploy or detection failed), translate client-side
+            if translated == nil && language != "en" && language != "unknown" {
+                let (t, l) = await translateViaServer(text: decoded.lyrics)
+                translated = t
+                if let l { language = l }
+            }
             return LyricsResult(
                 original:   decoded.lyrics,
-                translated: decoded.translated,
-                language:   decoded.language,
-                source:     decoded.source
+                translated: translated,
+                language:   language,
+                source:     decoded.source ?? "LrcLib"
             )
         } catch {
             return nil
         }
-    }
-
-    private func fetchFromGoogle(title: String, artist: String) async -> LyricsResult? {
-        let q = "\(artist) \(title) lyrics"
-            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        guard !q.isEmpty,
-              let url = URL(string: "https://www.google.com/search?q=\(q)&hl=en") else { return nil }
-
-        var req = URLRequest(url: url)
-        req.setValue(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            forHTTPHeaderField: "User-Agent"
-        )
-        req.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
-        req.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: req)
-            guard (response as? HTTPURLResponse)?.statusCode == 200,
-                  let html = String(data: data, encoding: .utf8) else { return nil }
-
-            guard let lyrics = extractGoogleLyrics(from: html), !lyrics.isEmpty else { return nil }
-
-            let (translated, detectedLang) = await translateViaServer(text: lyrics)
-            let lang = detectedLang ?? detectLanguage(lyrics)
-            return LyricsResult(original: lyrics, translated: translated, language: lang, source: "Google")
-        } catch { return nil }
-    }
-
-    private func extractGoogleLyrics(from html: String) -> String? {
-        var lines: [String] = []
-        var remaining = html[html.startIndex...]
-
-        // Google lyrics panel uses data-attrid containing "lyrics"
-        while let attrRange = remaining.range(of: "data-attrid=\"", options: .caseInsensitive) {
-            // Get the attribute value
-            let afterAttr = remaining[attrRange.upperBound...]
-            guard let closeQuote = afterAttr.range(of: "\"") else { break }
-            let attrValue = String(afterAttr[afterAttr.startIndex..<closeQuote.lowerBound])
-
-            guard attrValue.lowercased().contains("lyrics") else {
-                // Skip to after this attribute
-                remaining = remaining[closeQuote.upperBound...]
-                continue
-            }
-
-            // Find the opening tag's >
-            guard let tagClose = remaining.range(of: ">", range: attrRange.upperBound..<remaining.endIndex)
-            else { break }
-
-            // Walk the div depth to extract all text
-            var depth = 1
-            var cursor = tagClose.upperBound
-            var buffer = ""
-
-            while cursor < remaining.endIndex && depth > 0 {
-                if remaining[cursor...].hasPrefix("<br") {
-                    buffer += "\n"
-                    if let end = remaining.range(of: ">", range: cursor..<remaining.endIndex) {
-                        cursor = end.upperBound; continue
-                    }
-                } else if remaining[cursor...].hasPrefix("<div") {
-                    depth += 1
-                    if let end = remaining.range(of: ">", range: cursor..<remaining.endIndex) {
-                        cursor = end.upperBound; continue
-                    }
-                } else if remaining[cursor...].hasPrefix("</div") {
-                    depth -= 1
-                    if depth == 0 { break }
-                    if let end = remaining.range(of: ">", range: cursor..<remaining.endIndex) {
-                        cursor = end.upperBound; continue
-                    }
-                } else if remaining[cursor] == "<" {
-                    if let end = remaining.range(of: ">", range: cursor..<remaining.endIndex) {
-                        cursor = end.upperBound; continue
-                    }
-                } else {
-                    buffer.append(remaining[cursor])
-                }
-                cursor = remaining.index(after: cursor)
-            }
-
-            let cleaned = buffer
-                .replacingOccurrences(of: "&#x27;", with: "'")
-                .replacingOccurrences(of: "&amp;",  with: "&")
-                .replacingOccurrences(of: "&quot;", with: "\"")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleaned.isEmpty {
-                lines.append(contentsOf: cleaned.components(separatedBy: "\n")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty })
-            }
-            remaining = remaining[cursor...]
-        }
-
-        guard lines.count >= 3 else { return nil }
-        return lines.joined(separator: "\n")
     }
 
     private func fetchFromGenius(title: String, artist: String) async -> LyricsResult? {
@@ -263,12 +168,24 @@ actor LyricsService {
                   let resp    = json["response"] as? [String: Any],
                   let hits    = resp["hits"] as? [[String: Any]] else { return nil }
 
+            // Significant words from our title (≥3 chars, diacritics stripped) that
+            // must appear in the Genius hit title — prevents scraping wrong pages.
+            let titleWords = title
+                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { $0.count >= 3 }
+
             for hit in hits.prefix(5) {
                 guard hit["type"] as? String == "song",
                       let result = hit["result"] as? [String: Any],
                       let path   = result["path"] as? String,
                       path.hasSuffix("-lyrics"),          // only actual song lyrics pages
                       let pageUrl = URL(string: "https://genius.com\(path)") else { continue }
+
+                // Verify the hit title actually matches our song (avoid release-list pages)
+                let hitTitle = (result["title"] as? String ?? "")
+                    .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+                guard titleWords.isEmpty || titleWords.contains(where: { hitTitle.contains($0) }) else { continue }
 
                 var pageReq = URLRequest(url: pageUrl)
                 pageReq.setValue(
@@ -375,10 +292,7 @@ actor LyricsService {
                 cursor = remaining.index(after: cursor)
             }
 
-            let cleaned = buffer
-                .replacingOccurrences(of: "&#x27;", with: "'")
-                .replacingOccurrences(of: "&amp;",  with: "&")
-                .replacingOccurrences(of: "&quot;", with: "\"")
+            let cleaned = decodeHTMLEntities(buffer)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !cleaned.isEmpty { parts.append(cleaned) }
             remaining = remaining[cursor...]
@@ -386,6 +300,53 @@ actor LyricsService {
 
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: "\n\n")
+    }
+
+    nonisolated private func decodeHTMLEntities(_ text: String) -> String {
+        var s = text
+        // Collapse raw HTML whitespace (indentation newlines) — real line breaks come from <br>
+        s = s.replacingOccurrences(of: "\r\n", with: "\n")
+        // Named entities
+        let named: [(String, String)] = [
+            ("&amp;",   "&"),  ("&lt;",    "<"),  ("&gt;",    ">"),
+            ("&quot;",  "\""), ("&apos;",  "'"),  ("&nbsp;",  " "),
+            ("&rsquo;", "'"),  ("&lsquo;", "'"),  ("&sbquo;", "'"),
+            ("&rdquo;", "\u{201D}"), ("&ldquo;", "\u{201C}"),
+            ("&hellip;","…"),  ("&ndash;", "–"),  ("&mdash;", "—"),
+            ("&times;", "×"),  ("&copy;",  "©"),
+        ]
+        for (entity, replacement) in named {
+            s = s.replacingOccurrences(of: entity, with: replacement, options: .caseInsensitive)
+        }
+        // Numeric hex entities &#xNNNN;
+        if let regex = try? NSRegularExpression(pattern: "&#x([0-9a-fA-F]+);") {
+            let range = NSRange(s.startIndex..., in: s)
+            let matches = regex.matches(in: s, range: range).reversed()
+            for m in matches {
+                if let hexRange = Range(m.range(at: 1), in: s),
+                   let codePoint = UInt32(s[hexRange], radix: 16),
+                   let scalar = Unicode.Scalar(codePoint) {
+                    if let fullRange = Range(m.range, in: s) {
+                        s.replaceSubrange(fullRange, with: String(scalar))
+                    }
+                }
+            }
+        }
+        // Numeric decimal entities &#NNNN;
+        if let regex = try? NSRegularExpression(pattern: "&#([0-9]+);") {
+            let range = NSRange(s.startIndex..., in: s)
+            let matches = regex.matches(in: s, range: range).reversed()
+            for m in matches {
+                if let numRange = Range(m.range(at: 1), in: s),
+                   let codePoint = UInt32(s[numRange]),
+                   let scalar = Unicode.Scalar(codePoint) {
+                    if let fullRange = Range(m.range, in: s) {
+                        s.replaceSubrange(fullRange, with: String(scalar))
+                    }
+                }
+            }
+        }
+        return s
     }
 
     private func fetchFromLyricsOvh(title: String, artist: String) async -> LyricsResult? {
@@ -470,30 +431,50 @@ actor LyricsService {
         let key = "\(cleanedArtist)|\(cleanedTitle)".lowercased()
         if let hit = syncedCache[key] { return hit.isEmpty ? nil : hit }
 
-        var comps = URLComponents(string: "https://lrclib.net/api/search")!
-        comps.queryItems = [
-            URLQueryItem(name: "track_name",  value: cleanedTitle),
-            URLQueryItem(name: "artist_name", value: cleanedArtist),
-        ]
-        guard let url = comps.url else { return nil }
+        // Primary search
+        if let lines = await lrclibSyncedSearch(trackName: cleanedTitle, artistName: cleanedArtist),
+           !lines.isEmpty {
+            syncedCache[key] = lines
+            return lines
+        }
 
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let results = try JSONDecoder().decode([LRCLibResult].self, from: data)
-
-            // Pick the first result that has real per-line timestamps
-            for result in results {
-                guard let lrc = result.syncedLyrics, !lrc.isEmpty else { continue }
-                let lines = parseLRC(lrc)
-                if lines.count > 3 {
-                    syncedCache[key] = lines
-                    return lines
-                }
+        // Retry: when artist is empty the title may be "Artist SongTitle" with no dash —
+        // split on the last whitespace group so the first part becomes the artist.
+        // Example: "いきものがかり ブルーバード" → artist="いきものがかり", track="ブルーバード"
+        if cleanedArtist.isEmpty, let spaceIdx = cleanedTitle.lastIndex(of: " ") {
+            let retryArtist = String(cleanedTitle[cleanedTitle.startIndex..<spaceIdx])
+            let retryTitle  = String(cleanedTitle[cleanedTitle.index(after: spaceIdx)...])
+            if !retryArtist.isEmpty && !retryTitle.isEmpty,
+               let lines = await lrclibSyncedSearch(trackName: retryTitle, artistName: retryArtist),
+               !lines.isEmpty {
+                syncedCache[key] = lines
+                return lines
             }
-        } catch {}
+        }
 
         syncedCache[key] = []
         return nil
+    }
+
+    private func lrclibSyncedSearch(trackName: String, artistName: String) async -> [LyricLine]? {
+        var comps = URLComponents(string: "https://lrclib.net/api/search")!
+        comps.queryItems = [
+            URLQueryItem(name: "track_name",  value: trackName),
+            URLQueryItem(name: "artist_name", value: artistName),
+        ]
+        guard let url = comps.url else { return nil }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let results = try JSONDecoder().decode([LRCLibResult].self, from: data)
+            for result in results {
+                guard let lrc = result.syncedLyrics, !lrc.isEmpty else { continue }
+                let lines = parseLRC(lrc)
+                if lines.count > 3 { return lines }
+            }
+            return []
+        } catch {
+            return nil
+        }
     }
 
     private func parseLRC(_ lrc: String) -> [LyricLine] {
