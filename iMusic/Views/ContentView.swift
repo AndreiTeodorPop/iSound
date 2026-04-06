@@ -335,6 +335,9 @@ struct ContentView: View {
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
+                .safeAreaInset(edge: .bottom) {
+                    Color.clear.frame(height: player.currentTrack != nil ? 80 : 0)
+                }
             }
             .overlay {
                 if showingSortSheet {
