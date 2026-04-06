@@ -118,6 +118,24 @@ actor LyricsService {
             return result
         }
 
+        // Retry: title may embed the artist with no dash (e.g. "いきものがかり ブルーバード").
+        // Split on the last space and retry all sources with separated artist/title.
+        if let spaceIdx = cleanedTitle.lastIndex(of: " ") {
+            let retryArtist = String(cleanedTitle[cleanedTitle.startIndex..<spaceIdx])
+            let retryTitle  = String(cleanedTitle[cleanedTitle.index(after: spaceIdx)...])
+            if !retryArtist.isEmpty && !retryTitle.isEmpty {
+                if let result = await fetchFromBackend(title: retryTitle, artist: retryArtist) {
+                    cache[key] = result; return result
+                }
+                if let result = await fetchFromGenius(title: retryTitle, artist: retryArtist) {
+                    cache[key] = result; return result
+                }
+                if let result = await fetchFromLyricsOvh(title: retryTitle, artist: retryArtist) {
+                    cache[key] = result; return result
+                }
+            }
+        }
+
         return nil
     }
 
@@ -439,10 +457,10 @@ actor LyricsService {
             return lines
         }
 
-        // Retry: when artist is empty the title may be "Artist SongTitle" with no dash —
-        // split on the last whitespace group so the first part becomes the artist.
+        // Retry: title may be "Artist SongTitle" with no dash (common for Japanese/CJK) —
+        // split on the last space so the first part becomes the artist.
         // Example: "いきものがかり ブルーバード" → artist="いきものがかり", track="ブルーバード"
-        if cleanedArtist.isEmpty, let spaceIdx = cleanedTitle.lastIndex(of: " ") {
+        if let spaceIdx = cleanedTitle.lastIndex(of: " ") {
             let retryArtist = String(cleanedTitle[cleanedTitle.startIndex..<spaceIdx])
             let retryTitle  = String(cleanedTitle[cleanedTitle.index(after: spaceIdx)...])
             if !retryArtist.isEmpty && !retryTitle.isEmpty,

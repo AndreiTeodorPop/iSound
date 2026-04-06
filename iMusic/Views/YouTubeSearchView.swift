@@ -88,19 +88,17 @@ struct YouTubeResultRow: View {
                 }
             }
 
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 1) {
-                Button {
-                    showingOptions = true
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
+            Button {
+                showingOptions = true
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
             }
+            .buttonStyle(.plain)
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onPlay)
