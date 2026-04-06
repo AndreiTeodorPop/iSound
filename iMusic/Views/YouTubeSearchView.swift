@@ -90,7 +90,7 @@ struct YouTubeResultRow: View {
 
             Spacer()
 
-            HStack(spacing: 10) {
+            HStack(spacing: 1) {
                 Button {
                     showingOptions = true
                 } label: {

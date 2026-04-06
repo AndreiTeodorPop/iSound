@@ -96,8 +96,7 @@ struct NowPlayingView: View {
                         .lineLimit(2)
                         .minimumScaleFactor(0.75)
                 }
-
-                Spacer(minLength: 0)
+                .frame(maxWidth: .infinity)
 
                 if currentYouTubeVideoID != nil {
                     Button {
