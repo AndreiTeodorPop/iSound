@@ -48,6 +48,7 @@ struct YouTubeResultRow: View {
     let isCurrentTrack: Bool
     let isDownloading: Bool
     let isDownloaded: Bool
+    var embedArtistInTitle: Bool = false
     let onPlay: () -> Void
     let onDownloadStarted: () -> Void
     let onDownloaded: (URL) -> Void
@@ -59,6 +60,14 @@ struct YouTubeResultRow: View {
     @State private var showingDuplicateAlert = false
     @State private var showingOptions = false
     @State private var downloadTask: Task<Void, Never>? = nil
+
+    private var displayTitle: String {
+        guard embedArtistInTitle, !result.artistName.isEmpty,
+              !result.title.lowercased().hasPrefix(result.artistName.lowercased()) else {
+            return result.title
+        }
+        return "\(result.artistName) - \(result.title)"
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -73,8 +82,10 @@ struct YouTubeResultRow: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(result.title).font(.headline).lineLimit(2)
-                Text(result.artistName).font(.caption).foregroundStyle(.secondary)
+                Text(displayTitle).font(.headline).lineLimit(2)
+                if !embedArtistInTitle {
+                    Text(result.artistName).font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             Spacer()
@@ -162,10 +173,13 @@ struct YouTubeResultRow: View {
             try library.copyToDownloads(from: tempURL, fileName: fileName)
             await library.loadExistingTracks()
             let savedURL = library.downloadsDirectory.appendingPathComponent(fileName)
-            if let track = library.tracks.first(where: { $0.url.lastPathComponent == fileName }),
-               (track.artist?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty,
-               !result.artistName.isEmpty {
-                library.updateTrackMetadata(track, title: track.title, artist: result.artistName)
+            if let track = library.tracks.first(where: { $0.url.lastPathComponent == fileName }) {
+                var apiDuration: TimeInterval? = result.durationSeconds > 0 ? result.durationSeconds : nil
+                if apiDuration == nil, let streamInfo = try? await StreamService.getStreamURL(for: result.id) {
+                    apiDuration = streamInfo.duration > 0 ? streamInfo.duration : nil
+                }
+                let artist = result.artistName.isEmpty ? track.artist : result.artistName
+                library.updateTrackMetadata(track, title: track.title, artist: artist, duration: apiDuration)
             }
             onDownloaded(savedURL)
         } catch {
@@ -425,7 +439,7 @@ struct YouTubeSearchView: View {
                 : stream.artist
             player.playYouTube(
                 url: url,
-                title: stream.title,
+                title: result.title,
                 artist: artist,
                 duration: stream.duration,
                 videoID: result.id
@@ -687,10 +701,13 @@ struct YouTubeTrackOptionsSheet: View {
             try library.copyToDownloads(from: tempURL, fileName: fileName)
             await library.loadExistingTracks()
             let savedURL = library.downloadsDirectory.appendingPathComponent(fileName)
-            if let track = library.tracks.first(where: { $0.url.lastPathComponent == fileName }),
-               (track.artist?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty,
-               !result.artistName.isEmpty {
-                library.updateTrackMetadata(track, title: track.title, artist: result.artistName)
+            if let track = library.tracks.first(where: { $0.url.lastPathComponent == fileName }) {
+                var apiDuration: TimeInterval? = result.durationSeconds > 0 ? result.durationSeconds : nil
+                if apiDuration == nil, let streamInfo = try? await StreamService.getStreamURL(for: result.id) {
+                    apiDuration = streamInfo.duration > 0 ? streamInfo.duration : nil
+                }
+                let artist = result.artistName.isEmpty ? track.artist : result.artistName
+                library.updateTrackMetadata(track, title: track.title, artist: artist, duration: apiDuration)
             }
             onDownloaded(savedURL)
             isSavingToLibrary = false
@@ -799,10 +816,12 @@ private struct YouTubeAddToPlaylistSheet: View {
                 let savedURL = library.downloadsDirectory.appendingPathComponent(fileName)
                 // Match by filename — more reliable than full URL comparison
                 if let track = library.tracks.first(where: { $0.url.lastPathComponent == fileName }) {
-                    if (track.artist?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty,
-                       !result.artistName.isEmpty {
-                        library.updateTrackMetadata(track, title: track.title, artist: result.artistName)
+                    var apiDuration: TimeInterval? = result.durationSeconds > 0 ? result.durationSeconds : nil
+                    if apiDuration == nil, let streamInfo = try? await StreamService.getStreamURL(for: result.id) {
+                        apiDuration = streamInfo.duration > 0 ? streamInfo.duration : nil
                     }
+                    let artist = result.artistName.isEmpty ? track.artist : result.artistName
+                    library.updateTrackMetadata(track, title: track.title, artist: artist, duration: apiDuration)
                     if let target = library.playlists.first(where: { $0.id == playlistID }) {
                         // Use the (possibly updated) track from the library
                         let updatedTrack = library.tracks.first(where: { $0.url.lastPathComponent == fileName }) ?? track

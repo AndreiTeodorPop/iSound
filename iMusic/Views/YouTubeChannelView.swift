@@ -441,6 +441,7 @@ struct PlaylistItemsView: View {
             isCurrentTrack:    player.currentTrack?.youtubeVideoID == result.id,
             isDownloading:     downloadingIDs.contains(result.id),
             isDownloaded:      downloadedIDs.contains(result.id),
+            embedArtistInTitle: true,
             onPlay: {
                 Task { await playResult(result) }
             },
@@ -487,7 +488,7 @@ struct PlaylistItemsView: View {
                 : stream.artist
             player.playYouTube(
                 url: url,
-                title: stream.title,
+                title: playlistDisplayTitle(songTitle: result.title, artist: artist),
                 artist: artist,
                 duration: stream.duration,
                 videoID: result.id
@@ -517,7 +518,7 @@ struct PlaylistItemsView: View {
                 : stream.artist
             player.playYouTube(
                 url: url,
-                title: stream.title,
+                title: playlistDisplayTitle(songTitle: first.title, artist: artist),
                 artist: artist,
                 duration: stream.duration,
                 videoID: first.id
@@ -547,7 +548,7 @@ struct PlaylistItemsView: View {
                 : stream.artist
             player.playYouTube(
                 url: url,
-                title: stream.title,
+                title: playlistDisplayTitle(songTitle: first.title, artist: artist),
                 artist: artist,
                 duration: stream.duration,
                 videoID: first.id
@@ -556,6 +557,18 @@ struct PlaylistItemsView: View {
             showToast(.error(error.localizedDescription))
         }
         isLoadingID = nil
+    }
+
+    // MARK: - Helpers
+
+    private func playlistDisplayTitle(songTitle: String, artist: String) -> String {
+        let clean = artist.lowercased().hasSuffix(" - topic")
+            ? String(artist.dropLast(" - topic".count)).trimmingCharacters(in: .whitespaces)
+            : artist
+        guard !clean.isEmpty, !songTitle.lowercased().hasPrefix(clean.lowercased()) else {
+            return songTitle
+        }
+        return "\(clean) - \(songTitle)"
     }
 
     // MARK: - Load

@@ -170,7 +170,7 @@ final class AudioLibrary: ObservableObject {
     /// The file is never renamed — the cache key is the filename, so edits
     /// survive app-container path changes (reinstalls, Xcode rebuilds) and
     /// re-importing the original file no longer creates duplicates.
-    func updateTrackMetadata(_ track: Track, title: String, artist: String?) {
+    func updateTrackMetadata(_ track: Track, title: String, artist: String?, duration: TimeInterval? = nil) {
         let newTitle  = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         ? track.title
                         : title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -186,10 +186,12 @@ final class AudioLibrary: ObservableObject {
             album: track.album, duration: track.duration, modDate: Date()
         )
 
+        let newDuration = duration ?? existing.duration
+
         // ── Persist updated metadata (filename key, no file rename) ───────────
         cache[cacheKey] = CachedMeta(
             title: newTitle, artist: newArtist,
-            album: existing.album, duration: existing.duration, modDate: existing.modDate
+            album: existing.album, duration: newDuration, modDate: existing.modDate
         )
         // Clean up any stale full-path key left from the old format
         cache.removeValue(forKey: track.url.path)
@@ -197,7 +199,7 @@ final class AudioLibrary: ObservableObject {
 
         // ── Rebuild the in-memory track list ──────────────────────────────────
         let updatedTrack = Track(url: track.url, title: newTitle, artist: newArtist,
-                                 album: existing.album, duration: existing.duration)
+                                 album: existing.album, duration: newDuration)
         tracks = tracks.map { $0.id == track.id ? updatedTrack : $0 }
 
         // ── Sync the player so NowPlayingView updates immediately ─────────────
@@ -407,7 +409,15 @@ final class AudioLibrary: ObservableObject {
         var duration: TimeInterval?
 
         do {
-            duration = try await asset.load(.duration).seconds
+            // AVAudioPlayer decodes the actual audio and gives an accurate duration.
+            // AVURLAsset reads from the container header which is incorrect for
+            // fragmented MP4/M4A files downloaded from YouTube (reports inflated values).
+            if let player = try? AVAudioPlayer(contentsOf: url), player.duration > 0 {
+                duration = player.duration
+            } else {
+                let assetDuration = try await asset.load(.duration)
+                if assetDuration.isNumeric { duration = assetDuration.seconds }
+            }
             for item in try await asset.load(.commonMetadata) {
                 switch item.commonKey?.rawValue {
                 case "title":     if let v = try? await item.load(.stringValue) { title = v }

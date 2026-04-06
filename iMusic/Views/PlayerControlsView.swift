@@ -72,7 +72,8 @@ struct PlayerControlsView: View {
 
                 let title = player.currentTrack?.title ?? "Not Playing"
                 let artist = player.currentTrack?.artist ?? ""
-                Text(artist.isEmpty ? title : "\(artist) - \(title)")
+                let isYouTube = player.currentTrack?.youtubeVideoID != nil
+                Text(artist.isEmpty || isYouTube ? title : "\(artist) - \(title)")
                     .font(.subheadline).bold()
                     .lineLimit(1)
 

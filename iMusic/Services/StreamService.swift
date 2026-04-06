@@ -60,14 +60,7 @@ struct StreamService {
             ext = "mp3"
         }
 
-        let rawName: String
-        if let artist = artist, !artist.trimmingCharacters(in: .whitespaces).isEmpty {
-            rawName = "\(artist) - \(title)"
-        } else {
-            rawName = title
-        }
-
-        let sanitized = rawName
+        let sanitized = title
             .replacingOccurrences(of: "/",  with: "-")
             .replacingOccurrences(of: ":",  with: "-")
             .replacingOccurrences(of: "\"", with: "")

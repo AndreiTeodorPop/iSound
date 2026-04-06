@@ -357,7 +357,10 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             let player = try AVAudioPlayer(contentsOf: track.url)
             self.player = player
             self.currentTrack = track
-            self.duration = player.duration
+            // Prefer the metadata duration (set from YouTube API after download) over
+            // the file duration — YouTube downloads contain silence padding at the end
+            // which inflates player.duration beyond the actual music content.
+            self.duration = (track.duration ?? 0) > 0 ? track.duration! : player.duration
             self.currentTime = 0
             player.delegate = self
             player.prepareToPlay()
@@ -616,7 +619,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
                     let artist = stream.artist.trimmingCharacters(in: .whitespaces).isEmpty
                         ? result.artistName
                         : stream.artist
-                    playYouTube(url: url, title: stream.title, artist: artist,
+                    playYouTube(url: url, title: result.title, artist: artist,
                                 duration: stream.duration, videoID: result.id)
                     return
                 } catch {
@@ -680,7 +683,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 : stream.artist
             playYouTube(
                 url: url,
-                title: stream.title,
+                title: result.title,
                 artist: artist,
                 duration: stream.duration,
                 videoID: result.id
@@ -715,6 +718,14 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             Task { @MainActor in
                 guard let player = self.player else { return }
                 self.currentTime = player.currentTime
+                // Stop early if we've reached the stored duration (handles silence-padded downloads)
+                if self.duration > 0, player.currentTime >= self.duration {
+                    player.stop()
+                    self.isPlaying = false
+                    self.stopTimer()
+                    self.playNext()
+                    return
+                }
                 if !player.isPlaying { self.isPlaying = false; self.stopTimer() }
             }
         }
@@ -972,7 +983,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             avPlayer.delegate = self
             avPlayer.prepareToPlay()
             self.player = avPlayer
-            self.duration = avPlayer.duration
+            self.duration = (track.duration ?? 0) > 0 ? track.duration! : avPlayer.duration
         } catch {
             print("restoreLastPlayed: could not prepare player – \(error)")
             return
