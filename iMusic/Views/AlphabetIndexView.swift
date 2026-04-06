@@ -1,10 +1,10 @@
 import SwiftUI
 import UIKit
 
-struct AlphabetIndexView: View {
+struct AlphabetIndexView<ID: Hashable>: View {
     let proxy: ScrollViewProxy
     let availableLetters: Set<String>
-    let firstID: (String) -> UUID?
+    let firstID: (String) -> ID?
 
     private let allLetters: [String] = ["#"] + (65...90).map { String(UnicodeScalar($0)!) }
     private let letterHeight: CGFloat = 16

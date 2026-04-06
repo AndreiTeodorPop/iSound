@@ -215,8 +215,14 @@ struct PlaylistItemsView: View {
     @State private var toast: ToastType?
     @State private var toastTask: Task<Void, Never>?
     @State private var searchText = ""
-    @State private var sortOrder: SortOrder = .defaultOrder
+    @AppStorage("ytPlaylistSortOrder") private var sortOrder: SortOrder = .defaultOrder
     @State private var showingSortSheet = false
+    @State private var showingDeleteConfirmation = false
+    @Environment(\.dismiss) private var dismiss
+
+    private var linkedPlaylist: Playlist? {
+        library.playlists.first { $0.linkedYouTubePlaylist?.playlistID == playlist.id }
+    }
 
     enum SortOrder: String, CaseIterable {
         case titleAZ, titleZA, defaultOrder
@@ -252,6 +258,7 @@ struct PlaylistItemsView: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         List {
             // Song count header
             if !items.isEmpty {
@@ -262,6 +269,15 @@ struct PlaylistItemsView: View {
                         Text("\(items.count) songs")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        Spacer()
+                        if linkedPlaylist != nil {
+                            Button { showingDeleteConfirmation = true } label: {
+                                Image(systemName: "heart.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                     .listRowBackground(Color.clear)
@@ -315,6 +331,7 @@ struct PlaylistItemsView: View {
             Section {
                 ForEach(filteredItems) { result in
                     resultRow(result)
+                        .id(result.id)
                         .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                 }
                 if !searchText.isEmpty && filteredItems.isEmpty {
@@ -323,6 +340,23 @@ struct PlaylistItemsView: View {
                 }
             }
         }
+        .overlay(alignment: .trailing) {
+            if !filteredItems.isEmpty && sortOrder.isAlphabetical {
+                let available: Set<String> = Set(filteredItems.map { result in
+                    let ch = result.title.first
+                    return (ch?.isLetter == true) ? String(ch!).uppercased() : "#"
+                })
+                AlphabetIndexView(proxy: proxy, availableLetters: available) { letter in
+                    guard letter != "#" else {
+                        return filteredItems.first { !($0.title.first?.isLetter ?? true) }?.id
+                    }
+                    return filteredItems.first { $0.title.uppercased().hasPrefix(letter) }?.id
+                }
+                .padding(.vertical, 8)
+                .padding(.trailing, 4)
+            }
+        }
+        } // end ScrollViewReader
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: player.currentTrack != nil ? 80 : 0)
         }
@@ -363,6 +397,15 @@ struct PlaylistItemsView: View {
                         .fontWeight(.semibold)
                 }
             }
+        }
+        .alert("Do you want to delete this playlist?", isPresented: $showingDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                if let p = linkedPlaylist { library.deletePlaylist(p) }
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will remove the playlist from your library.")
         }
         .task { await loadItems() }
         .onChange(of: library.tracks) { (_: [Track], tracks: [Track]) in
@@ -442,10 +485,11 @@ struct PlaylistItemsView: View {
     }
 
     private func playAll() async {
-        guard !items.isEmpty, isLoadingID == nil else { return }
-        let first = items[0]
+        let queue = filteredItems.isEmpty ? items : filteredItems
+        guard !queue.isEmpty, isLoadingID == nil else { return }
+        let first = queue[0]
         isLoadingID = first.id
-        player.setYouTubeQueue(items, startingAt: 0)
+        player.setYouTubeQueue(queue, startingAt: 0)
 
         do {
             let stream = try await StreamService.getStreamURL(for: first.id)
