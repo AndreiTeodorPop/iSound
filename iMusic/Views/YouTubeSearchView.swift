@@ -91,11 +91,6 @@ struct YouTubeResultRow: View {
             Spacer()
 
             HStack(spacing: 10) {
-                if result.durationSeconds > 0 {
-                    Text(result.durationSeconds.mmss)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
                 Button {
                     showingOptions = true
                 } label: {

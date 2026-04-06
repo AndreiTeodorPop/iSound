@@ -423,7 +423,11 @@ struct ContentView: View {
         switch playlistSortOrder {
         case .custom:         return library.playlists
         case .alphabetically: return library.playlists.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        case .byTracksCount:  return library.playlists.sorted { $0.trackIDs.count > $1.trackIDs.count }
+        case .byTracksCount:  return library.playlists.sorted {
+            let lhs = $0.linkedYouTubePlaylist?.itemCount ?? $0.trackIDs.count
+            let rhs = $1.linkedYouTubePlaylist?.itemCount ?? $1.trackIDs.count
+            return lhs > rhs
+        }
         case .fromNewest:     return library.playlists.sorted { $0.createdAt > $1.createdAt }
         }
     }

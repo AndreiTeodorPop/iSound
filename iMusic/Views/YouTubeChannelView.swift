@@ -223,10 +223,13 @@ struct PlaylistItemsView: View {
     @State private var toast: ToastType?
     @State private var toastTask: Task<Void, Never>?
     @State private var searchText = ""
-    @AppStorage("ytPlaylistSortOrder") private var sortOrder: SortOrder = .defaultOrder
+    @State private var sortOrder: SortOrder = .defaultOrder
     @State private var showingSortSheet = false
     @State private var showingDeleteConfirmation = false
     @Environment(\.dismiss) private var dismiss
+
+    // Per-playlist sort key — avoids the shared-state bug that @AppStorage("ytPlaylistSortOrder") would cause.
+    private var sortKey: String { "ytPlaylistSortOrder_\(playlist.id)" }
 
     private var linkedPlaylist: Playlist? {
         library.playlists.first { $0.linkedYouTubePlaylist?.playlistID == playlist.id }
@@ -248,10 +251,18 @@ struct PlaylistItemsView: View {
         var isAlphabetical: Bool { self == .titleAZ || self == .titleZA }
     }
 
+    private func displaySortKey(_ result: YouTubeResult) -> String {
+        guard !result.artistName.isEmpty,
+              !result.title.lowercased().hasPrefix(result.artistName.lowercased()) else {
+            return result.title
+        }
+        return "\(result.artistName) - \(result.title)"
+    }
+
     private var sortedItems: [YouTubeResult] {
         switch sortOrder {
-        case .titleAZ:      return items.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        case .titleZA:      return items.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending }
+        case .titleAZ:      return items.sorted { displaySortKey($0).localizedCaseInsensitiveCompare(displaySortKey($1)) == .orderedAscending }
+        case .titleZA:      return items.sorted { displaySortKey($0).localizedCaseInsensitiveCompare(displaySortKey($1)) == .orderedDescending }
         case .defaultOrder: return items
         }
     }
@@ -357,14 +368,14 @@ struct PlaylistItemsView: View {
         .overlay(alignment: .trailing) {
             if !filteredItems.isEmpty && sortOrder.isAlphabetical {
                 let available: Set<String> = Set(filteredItems.map { result in
-                    let ch = result.title.first
+                    let ch = displaySortKey(result).first
                     return (ch?.isLetter == true) ? String(ch!).uppercased() : "#"
                 })
                 AlphabetIndexView(proxy: proxy, availableLetters: available) { letter in
                     guard letter != "#" else {
-                        return filteredItems.first { !($0.title.first?.isLetter ?? true) }?.id
+                        return filteredItems.first { !(displaySortKey($0).first?.isLetter ?? true) }?.id
                     }
-                    return filteredItems.first { $0.title.uppercased().hasPrefix(letter) }?.id
+                    return filteredItems.first { displaySortKey($0).uppercased().hasPrefix(letter) }?.id
                 }
                 .padding(.vertical, 8)
                 .padding(.trailing, 4)
@@ -422,6 +433,15 @@ struct PlaylistItemsView: View {
             Text("This will remove the playlist from your library.")
         }
         .task { await loadItems() }
+        .onAppear {
+            if let raw = UserDefaults.standard.string(forKey: sortKey),
+               let saved = SortOrder(rawValue: raw) {
+                sortOrder = saved
+            }
+        }
+        .onChange(of: sortOrder) { _, newValue in
+            UserDefaults.standard.set(newValue.rawValue, forKey: sortKey)
+        }
         .onChange(of: library.tracks) { (_: [Track], tracks: [Track]) in
             let savedTitles = Set(tracks.map { $0.title })
             let updatedIDs = downloadedIDs.filter { (id: String) -> Bool in
