@@ -33,6 +33,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     // YouTube queue
     private var youtubeQueue: [YouTubeResult] = []
+    private var originalYouTubeQueue: [YouTubeResult] = []
     private var youtubeIndex: Int = 0
     private var youtubeHistory: [YouTubeResult] = []
     private var isLoadingNextYouTube: Bool = false
@@ -48,16 +49,28 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     /// Call this from YouTubeSearchView when playing a result,
     /// passing the full results list so next/previous works.
     func setYouTubeQueue(_ results: [YouTubeResult], startingAt index: Int) {
-        youtubeQueue = results
-        youtubeIndex = index
+        originalYouTubeQueue = results
         youtubeHistory = []
         playlistQueue = []
         originalQueue = []
         currentPlaylistName = nil
+
+        if isShuffled && results.count > 1 {
+            let current = results[index]
+            var remaining = results
+            remaining.remove(at: index)
+            remaining.shuffle()
+            youtubeQueue = [current] + remaining
+            youtubeIndex = 0
+        } else {
+            youtubeQueue = results
+            youtubeIndex = index
+        }
     }
 
     func clearYouTubeQueue() {
         youtubeQueue = []
+        originalYouTubeQueue = []
         youtubeIndex = 0
         youtubeHistory = []
         playedYouTubeIDs = []
@@ -75,6 +88,21 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     func toggleShuffle() {
         isShuffled.toggle()
         UserDefaults.standard.set(isShuffled, forKey: "shuffleEnabled")
+
+        if !youtubeQueue.isEmpty {
+            let current = youtubeQueue[youtubeIndex]
+            if isShuffled {
+                var remaining = youtubeQueue.filter { $0.id != current.id }
+                remaining.shuffle()
+                youtubeQueue = [current] + remaining
+                youtubeIndex = 0
+            } else {
+                youtubeQueue = originalYouTubeQueue
+                youtubeIndex = originalYouTubeQueue.firstIndex { $0.id == current.id } ?? 0
+            }
+            return
+        }
+
         guard !playlistQueue.isEmpty else { return }
         let current = playlistQueue[currentIndex]
         if isShuffled {
@@ -202,10 +230,11 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             }
         }
 
+        let cleanArtist = Self.stripYouTubeTopic(from: artist)
         currentTrack = Track(
             url: url,
             title: title,
-            artist: artist,
+            artist: cleanArtist,
             album: nil,
             duration: duration,
             youtubeVideoID: videoID
@@ -237,6 +266,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
 
         updateNowPlayingInfo()
+        saveLastPlayedYouTube()
 
         Task { @MainActor [weak self] in
             do {
@@ -403,6 +433,26 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             updateNowPlayingInfo()
             return
         }
+        // Restored YouTube track with no active stream — re-fetch and start
+        if let track = currentTrack, track.isYouTubeTrack, let videoID = track.youtubeVideoID {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let stream = try await StreamService.getStreamURL(for: videoID)
+                    guard let url = URL(string: stream.url) else { return }
+                    self.playYouTube(
+                        url: url,
+                        title: track.title,
+                        artist: track.artist ?? stream.artist,
+                        duration: stream.duration,
+                        videoID: videoID
+                    )
+                } catch {
+                    print("Failed to re-fetch YouTube stream: \(error)")
+                }
+            }
+            return
+        }
         guard let player else { return }
         if player.isPlaying { player.pause(); isPlaying = false; stopTimer() }
         else                { player.play();  isPlaying = true;  startTimer() }
@@ -488,6 +538,17 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             }
             return
         }
+        // YouTube track restored from persistence — queue not in memory, fetch suggestions
+        if let track = currentTrack, track.isYouTubeTrack, let videoID = track.youtubeVideoID {
+            guard !isLoadingNextYouTube else { return }
+            isLoadingNextYouTube = true
+            beginStreamBackgroundTask()
+            Task {
+                await playSuggested(for: videoID)
+                isLoadingNextYouTube = false
+            }
+            return
+        }
         // Local queue — wrap around to the first track
         guard !playlistQueue.isEmpty else { stop(); return }
         currentIndex = (currentIndex + 1) % playlistQueue.count
@@ -552,7 +613,10 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 do {
                     let stream = try await StreamService.getStreamURL(for: result.id)
                     guard let url = URL(string: stream.url) else { continue }
-                    playYouTube(url: url, title: stream.title, artist: stream.artist,
+                    let artist = stream.artist.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? result.artistName
+                        : stream.artist
+                    playYouTube(url: url, title: stream.title, artist: artist,
                                 duration: stream.duration, videoID: result.id)
                     return
                 } catch {
@@ -611,10 +675,13 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         do {
             let stream = try await StreamService.getStreamURL(for: result.id)
             guard let url = URL(string: stream.url) else { return false }
+            let artist = stream.artist.trimmingCharacters(in: .whitespaces).isEmpty
+                ? result.artistName
+                : stream.artist
             playYouTube(
                 url: url,
                 title: stream.title,
-                artist: stream.artist,
+                artist: artist,
                 duration: stream.duration,
                 videoID: result.id
             )
@@ -770,6 +837,9 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         var info: [String: Any] = [:]
         if let track = currentTrack {
             info[MPMediaItemPropertyTitle] = track.title
+            if let artist = track.artist, !artist.isEmpty {
+                info[MPMediaItemPropertyArtist] = artist
+            }
             info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
             info[MPMediaItemPropertyPlaybackDuration] = duration
         }
@@ -808,6 +878,60 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
 
+    // MARK: - YouTube Last Played Persistence
+
+    private enum YouTubePersistenceKey {
+        static let videoID  = "lastYouTubeVideoID"
+        static let title    = "lastYouTubeTitle"
+        static let artist   = "lastYouTubeArtist"
+        static let duration = "lastYouTubeDuration"
+        static let queue    = "lastYouTubeQueue"
+        static let index    = "lastYouTubeIndex"
+    }
+
+    private func saveLastPlayedYouTube() {
+        guard let track = currentTrack, track.isYouTubeTrack,
+              let videoID = track.youtubeVideoID else { return }
+        UserDefaults.standard.set(videoID,          forKey: YouTubePersistenceKey.videoID)
+        UserDefaults.standard.set(track.title,      forKey: YouTubePersistenceKey.title)
+        UserDefaults.standard.set(track.artist,     forKey: YouTubePersistenceKey.artist)
+        UserDefaults.standard.set(duration,         forKey: YouTubePersistenceKey.duration)
+        UserDefaults.standard.set(youtubeIndex,     forKey: YouTubePersistenceKey.index)
+        if let data = try? JSONEncoder().encode(youtubeQueue) {
+            UserDefaults.standard.set(data, forKey: YouTubePersistenceKey.queue)
+        }
+        // Clear local track state so it doesn't win on next restore
+        UserDefaults.standard.removeObject(forKey: PersistenceKey.trackID)
+    }
+
+    /// Restores the last played YouTube track as a paused mini-player entry.
+    /// The stream URL is re-fetched on demand when the user taps play.
+    func restoreLastPlayedYouTube() {
+        guard currentTrack == nil,
+              let videoID = UserDefaults.standard.string(forKey: YouTubePersistenceKey.videoID),
+              let title   = UserDefaults.standard.string(forKey: YouTubePersistenceKey.title)
+        else { return }
+        let artist   = UserDefaults.standard.string(forKey: YouTubePersistenceKey.artist)
+        let duration = UserDefaults.standard.double(forKey: YouTubePersistenceKey.duration)
+        // Restore queue and index so next/previous works without re-fetching
+        if let data  = UserDefaults.standard.data(forKey: YouTubePersistenceKey.queue),
+           let queue = try? JSONDecoder().decode([YouTubeResult].self, from: data) {
+            youtubeQueue         = queue
+            originalYouTubeQueue = queue
+        }
+        youtubeIndex = UserDefaults.standard.integer(forKey: YouTubePersistenceKey.index)
+        // Use a stable placeholder URL — the real stream is fetched on play
+        let placeholderURL = URL(string: "https://www.youtube.com/watch?v=\(videoID)")!
+        currentTrack = Track(
+            url: placeholderURL, title: title, artist: artist,
+            album: nil, duration: duration > 0 ? duration : nil,
+            youtubeVideoID: videoID
+        )
+        self.duration = duration
+        isPlaying = false
+        updateNowPlayingInfo()
+    }
+
     // MARK: - Last Played Persistence
 
     private enum PersistenceKey {
@@ -819,8 +943,12 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private func saveLastPlayed() {
         guard let track = currentTrack, !track.isYouTubeTrack else { return }
         UserDefaults.standard.set(track.id.uuidString, forKey: PersistenceKey.trackID)
-        UserDefaults.standard.set(playlistQueue.map(\.id.uuidString), forKey: PersistenceKey.queueIDs)
+        // Always save the original (unshuffled) queue so toggling shuffle off after
+        // restore gives back the correct in-order sequence.
+        UserDefaults.standard.set(originalQueue.map(\.id.uuidString), forKey: PersistenceKey.queueIDs)
         UserDefaults.standard.set(currentPlaylistName, forKey: PersistenceKey.playlist)
+        // Clear YouTube state so it doesn't win on next restore
+        UserDefaults.standard.removeObject(forKey: YouTubePersistenceKey.videoID)
     }
 
     /// Restores the last played local track (paused) from the library.
@@ -852,12 +980,28 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
         currentPlaylistName = UserDefaults.standard.string(forKey: PersistenceKey.playlist)
         originalQueue  = queue.isEmpty ? [track] : queue
-        playlistQueue  = originalQueue
-        currentIndex   = playlistQueue.firstIndex(where: { $0.id == track.id }) ?? 0
+        if isShuffled {
+            var remaining = originalQueue.filter { $0.id != track.id }
+            remaining.shuffle()
+            playlistQueue = [track] + remaining
+            currentIndex  = 0
+        } else {
+            playlistQueue = originalQueue
+            currentIndex  = originalQueue.firstIndex(where: { $0.id == track.id }) ?? 0
+        }
         currentTrack   = track
         currentTime    = 0
         isPlaying      = false
         updateNowPlayingInfo()
+    }
+
+    // MARK: - Helpers
+
+    /// Strips the YouTube-generated " - Topic" suffix from artist names.
+    private static func stripYouTubeTopic(from artist: String) -> String {
+        let suffix = " - Topic"
+        guard artist.lowercased().hasSuffix(suffix.lowercased()) else { return artist }
+        return String(artist.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
     }
 
     deinit {

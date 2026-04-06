@@ -68,25 +68,15 @@ struct PlayerControlsView: View {
         VStack(spacing: 8) {
             // 1. Track Info Row
             HStack(spacing: 12) {
-                // Tappable area → expand to full player
-                Button(action: onExpand) {
-                    HStack(spacing: 12) {
-                        albumArtPlaceholder
+                albumArtPlaceholder
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(player.currentTrack?.title ?? "Not Playing")
-                                .font(.subheadline).bold()
-                                .lineLimit(1)
-                            Text(player.currentTrack?.artist ?? "Unknown Artist")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
+                let title = player.currentTrack?.title ?? "Not Playing"
+                let artist = player.currentTrack?.artist ?? ""
+                Text(artist.isEmpty ? title : "\(artist) - \(title)")
+                    .font(.subheadline).bold()
+                    .lineLimit(1)
 
-                        Spacer()
-                    }
-                }
-                .buttonStyle(.plain)
+                Spacer()
 
                 AVRoutePickerButton(font: .title2)
 
@@ -104,6 +94,8 @@ struct PlayerControlsView: View {
                 .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.15), radius: 10, y: 5)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onExpand)
     }
 
     // MARK: - Subcomponents

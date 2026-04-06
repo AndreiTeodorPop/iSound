@@ -269,7 +269,18 @@ struct ContentView: View {
             .navigationTitle("Home")
             // Destination keyed on UUID
             .navigationDestination(for: UUID.self) { id in
-                PlaylistDetailView(playlistID: id, library: library)
+                if let playlist = library.playlists.first(where: { $0.id == id }),
+                   let link = playlist.linkedYouTubePlaylist {
+                    let ytPlaylist = YouTubePlaylist(
+                        id: link.playlistID, title: playlist.name, description: "",
+                        thumbnailURL: link.thumbnailURL, itemCount: link.itemCount,
+                        channelTitle: link.channelTitle
+                    )
+                    PlaylistItemsView(playlist: ytPlaylist, library: library)
+                        .environmentObject(player)
+                } else {
+                    PlaylistDetailView(playlistID: id, library: library)
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -345,7 +356,18 @@ struct ContentView: View {
                 PlaylistSearchView(library: library)
             }
             .navigationDestination(item: $selectedPlaylistNav) { nav in
-                PlaylistDetailView(playlistID: nav.id, library: library, initialAction: nav.action)
+                if let playlist = library.playlists.first(where: { $0.id == nav.id }),
+                   let link = playlist.linkedYouTubePlaylist {
+                    let ytPlaylist = YouTubePlaylist(
+                        id: link.playlistID, title: playlist.name, description: "",
+                        thumbnailURL: link.thumbnailURL, itemCount: link.itemCount,
+                        channelTitle: link.channelTitle
+                    )
+                    PlaylistItemsView(playlist: ytPlaylist, library: library)
+                        .environmentObject(player)
+                } else {
+                    PlaylistDetailView(playlistID: nav.id, library: library, initialAction: nav.action)
+                }
             }
             .alert("Do you want to delete \"\(playlistToDelete?.name ?? "")\" playlist?", isPresented: $showingDeletePlaylistConfirm) {
                 Button("Delete", role: .destructive) {
@@ -407,7 +429,7 @@ struct ContentView: View {
     private var playlistsSection: some View {
         Section {
             ForEach(sortedPlaylists) { playlist in
-                PlaylistLibraryRow(playlist: playlist, trackCount: library.tracks.filter { playlist.trackIDs.contains($0.id) }.count) {
+                PlaylistLibraryRow(playlist: playlist, trackCount: playlist.linkedYouTubePlaylist?.itemCount ?? library.tracks.filter { playlist.trackIDs.contains($0.id) }.count) {
                     selectedPlaylistNav = PlaylistNavTarget(id: playlist.id, action: .none)
                 } onAddSongs: {
                     selectedPlaylistNav = PlaylistNavTarget(id: playlist.id, action: .addSongs)
@@ -483,6 +505,16 @@ struct ContentView: View {
                 .fill(themeManager.current.accent.gradient)
                 .frame(width: 140, height: 140)
                 .overlay(Image(systemName: "music.note.list").font(.largeTitle).foregroundColor(.white))
+                .overlay(alignment: .topTrailing) {
+                    if playlist.isYouTubePlaylist {
+                        Image(systemName: "play.rectangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .padding(6)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                            .padding(6)
+                    }
+                }
             Text(playlist.name).font(.subheadline).bold().lineLimit(1).foregroundStyle(.primary)
         }
         .frame(width: 140)
@@ -538,7 +570,15 @@ private struct PlaylistLibraryRow: View {
                         .frame(width: 50, height: 50)
                         .overlay(Image(systemName: "music.note.list").foregroundColor(.white))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(playlist.name).font(.headline)
+                        HStack(spacing: 6) {
+                            Text(playlist.name).font(.headline).lineLimit(1)
+                            if playlist.isYouTubePlaylist {
+                                Label("YouTube", systemImage: "play.rectangle.fill")
+                                    .labelStyle(.iconOnly)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
                         Text("\(trackCount) songs")
                             .font(.caption)
                             .foregroundStyle(.secondary)

@@ -40,7 +40,7 @@ struct StreamService {
 
     // MARK: - Download
 
-    static func downloadAudioToTemp(for videoId: String, title: String) async throws -> URL {
+    static func downloadAudioToTemp(for videoId: String, title: String, artist: String? = nil) async throws -> URL {
         guard let url = URL(string: "\(baseURL)/download?id=\(videoId)") else {
             throw StreamError.invalidURL
         }
@@ -60,7 +60,14 @@ struct StreamService {
             ext = "mp3"
         }
 
-        let sanitized = title
+        let rawName: String
+        if let artist = artist, !artist.trimmingCharacters(in: .whitespaces).isEmpty {
+            rawName = "\(artist) - \(title)"
+        } else {
+            rawName = title
+        }
+
+        let sanitized = rawName
             .replacingOccurrences(of: "/",  with: "-")
             .replacingOccurrences(of: ":",  with: "-")
             .replacingOccurrences(of: "\"", with: "")

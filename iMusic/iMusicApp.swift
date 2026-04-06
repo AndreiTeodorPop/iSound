@@ -30,6 +30,7 @@ struct iMusicApp: App {
                         .transition(.opacity)
                         .task { @MainActor in
                             sharedPlayer.configureAudioSession()
+                            sharedPlayer.restoreLastPlayedYouTube()
                             iMusicShortcuts.updateAppShortcutParameters()
                         }
                 }

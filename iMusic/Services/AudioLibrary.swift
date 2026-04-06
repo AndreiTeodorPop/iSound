@@ -61,9 +61,30 @@ final class AudioLibrary: ObservableObject {
 
     // MARK: - Playlist CRUD
 
-    func createPlaylist(name: String) {
-        playlists.append(Playlist(name: name))
+    func createPlaylist(name: String, isYouTubePlaylist: Bool = false) {
+        playlists.append(Playlist(name: name, isYouTubePlaylist: isYouTubePlaylist))
         savePlaylists()
+    }
+
+    /// Saves a YouTube playlist reference to the library without downloading any audio.
+    /// If a linked entry for the same YouTube playlist ID already exists it is not duplicated.
+    func linkYouTubePlaylist(id playlistID: String, name: String, thumbnailURL: String,
+                              itemCount: Int, channelTitle: String) {
+        guard !playlists.contains(where: { $0.linkedYouTubePlaylist?.playlistID == playlistID }) else { return }
+        let link = Playlist.LinkedYouTubePlaylist(
+            playlistID: playlistID, thumbnailURL: thumbnailURL,
+            itemCount: itemCount, channelTitle: channelTitle
+        )
+        playlists.append(Playlist(name: name, isYouTubePlaylist: true, linkedYouTubePlaylist: link))
+        savePlaylists()
+    }
+
+    /// Adds multiple tracks to a playlist in one shot and saves once.
+    func addTracks(_ tracks: [Track], to playlist: Playlist) {
+        guard let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
+        for track in tracks { playlists[index].trackIDs.insert(track.id) }
+        savePlaylists()
+        objectWillChange.send()
     }
 
     func deletePlaylist(_ playlist: Playlist) {
@@ -264,19 +285,23 @@ final class AudioLibrary: ObservableObject {
 
             let cache = loadMetaCache()
 
-            // Each task is nonisolated — runs truly in parallel on the thread pool
-            let results: [(index: Int, track: Track, path: String, meta: CachedMeta)] =
+            // Each task is nonisolated — runs truly in parallel on the thread pool.
+            // The tuple's `filename` member carries only the last path component so
+            // the metadata cache is always keyed by filename, never by full path.
+            // This ensures cache hits survive sandbox container path changes across
+            // app reinstalls or Xcode rebuilds.
+            let results: [(index: Int, track: Track, filename: String, meta: CachedMeta)] =
                 await withTaskGroup(of: (Int, Track, String, CachedMeta).self) { group in
                     for (index, url) in audioURLs.enumerated() {
                         group.addTask {
-                            let path = url.path
+                            let fullPath = url.path
                             let filename = url.lastPathComponent
                             let modDate = (try? url.resourceValues(
                                 forKeys: [.contentModificationDateKey]
                             ).contentModificationDate) ?? .distantPast
 
                             // Cache hit — try filename key first, fall back to full path (migration)
-                            if let cached = cache[filename] ?? cache[path],
+                            if let cached = cache[filename] ?? cache[fullPath],
                                abs(cached.modDate.timeIntervalSince(modDate)) < 1 {
                                 return await (index,
                                         Track(url: url, title: cached.title, artist: cached.artist,
@@ -297,18 +322,24 @@ final class AudioLibrary: ObservableObject {
                     }
                     var out: [(Int, Track, String, CachedMeta)] = []
                     for await r in group { out.append(r) }
-                    return out.map { (index: $0.0, track: $0.1, path: $0.2, meta: $0.3) }
+                    return out.map { (index: $0.0, track: $0.1, filename: $0.2, meta: $0.3) }
                 }
 
-            // Persist updated cache using filename keys, pruning deleted files
+            // Persist updated cache using filename keys, pruning deleted files.
+            // Always write under the filename key so the next launch's lookup hits
+            // cache[filename] correctly.
             let validFilenames = Set(audioURLs.map { $0.lastPathComponent })
             var updatedCache = cache.filter { validFilenames.contains($0.key) }
-            for r in results { updatedCache[r.path] = r.meta }
+            for r in results { updatedCache[r.filename] = r.meta }
             saveMetaCache(updatedCache)
 
             self.tracks = results.sorted { $0.index < $1.index }.map { $0.track }
 
-            // Prune stale track IDs from all playlists
+            // Prune stale track IDs from all playlists only when we have a non-empty
+            // track list. An empty result (e.g. the Downloads directory is temporarily
+            // inaccessible on a cold launch) must never be used to wipe playlist
+            // membership — that would permanently destroy the user's playlists.
+            guard !self.tracks.isEmpty else { return }
             let validIDs = Set(self.tracks.map { $0.id })
             var playlistsChanged = false
             for index in playlists.indices {

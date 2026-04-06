@@ -83,41 +83,48 @@ struct NowPlayingView: View {
                 .animation(.spring(response: 0.4, dampingFraction: 0.6), value: player.isPlaying)
 
             // MARK: Title & Artist
-            VStack(spacing: 8) {
-                Text(player.currentTrack?.title ?? "Unknown")
-                    .font(.title.bold())
-                    .multilineTextAlignment(.center)
+            HStack(spacing: 12) {
+                Spacer(minLength: 44)
 
-                HStack(spacing: 12) {
-                    Spacer(minLength: 44)
-                    Text(player.currentTrack?.artist ?? "Unknown Artist")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-
-                    if currentYouTubeVideoID != nil {
-                        Button {
-                            if !isDownloadingYouTube {
-                                isDownloadingYouTube = true
-                                Task { await downloadCurrentYouTubeTrack() }
-                            }
-                        } label: {
-                            Group {
-                                if isDownloadingYouTube {
-                                    ProgressView().frame(width: 28, height: 28)
-                                } else {
-                                    Image(systemName: "arrow.down.circle")
-                                        .foregroundStyle(.secondary)
-                                        .font(.title2)
-                                }
-                            }
-                            .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
+                VStack(spacing: 3) {
+                    let title = player.currentTrack?.title ?? "Unknown"
+                    let artist = player.currentTrack?.artist ?? ""
+                    if artist.isEmpty {
+                        Text(title)
+                            .font(.title2.bold())
+                            .multilineTextAlignment(.center)
                     } else {
-                        Spacer(minLength: 44)
+                        Text("\(artist) - \(title)")
+                            .font(.title2.bold())
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.75)
                     }
+                }
+
+                Spacer(minLength: 0)
+
+                if currentYouTubeVideoID != nil {
+                    Button {
+                        if !isDownloadingYouTube {
+                            isDownloadingYouTube = true
+                            Task { await downloadCurrentYouTubeTrack() }
+                        }
+                    } label: {
+                        Group {
+                            if isDownloadingYouTube {
+                                ProgressView().frame(width: 28, height: 28)
+                            } else {
+                                Image(systemName: "arrow.down.circle")
+                                    .foregroundStyle(.secondary)
+                                    .font(.title2)
+                            }
+                        }
+                        .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Spacer(minLength: 44)
                 }
             }
             .padding(.horizontal)
@@ -271,7 +278,7 @@ struct NowPlayingView: View {
             return
         }
         do {
-            let tempURL = try await StreamService.downloadAudioToTemp(for: videoID, title: title)
+            let tempURL = try await StreamService.downloadAudioToTemp(for: videoID, title: title, artist: player.currentTrack?.artist)
             isDownloadingYouTube = false
             presentShareSheet(url: tempURL)
         } catch {

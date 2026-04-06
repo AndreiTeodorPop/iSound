@@ -42,7 +42,7 @@ struct ToastView: View {
 
 // MARK: - Per-Row Download State
 
-private struct YouTubeResultRow: View {
+struct YouTubeResultRow: View {
     let result: YouTubeResult
     let isStreaming: Bool
     let isCurrentTrack: Bool
@@ -74,7 +74,7 @@ private struct YouTubeResultRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(result.title).font(.headline).lineLimit(2)
-                Text(result.channelTitle).font(.caption).foregroundStyle(.secondary)
+                Text(result.artistName).font(.caption).foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -155,12 +155,18 @@ private struct YouTubeResultRow: View {
         do {
             let tempURL = try await StreamService.downloadAudioToTemp(
                 for: result.id,
-                title: result.title
+                title: result.title,
+                artist: result.artistName
             )
             let fileName = tempURL.lastPathComponent
             try library.copyToDownloads(from: tempURL, fileName: fileName)
             await library.loadExistingTracks()
             let savedURL = library.downloadsDirectory.appendingPathComponent(fileName)
+            if let track = library.tracks.first(where: { $0.url.lastPathComponent == fileName }),
+               (track.artist?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty,
+               !result.artistName.isEmpty {
+                library.updateTrackMetadata(track, title: track.title, artist: result.artistName)
+            }
             onDownloaded(savedURL)
         } catch {
             if error is CancellationError || (error as? URLError)?.code == .cancelled {
@@ -171,6 +177,18 @@ private struct YouTubeResultRow: View {
         }
     }
 
+}
+
+// MARK: - Search Mode
+
+private enum SearchMode: CaseIterable {
+    case songs, channels
+    var label: String {
+        switch self {
+        case .songs:    return "Songs"
+        case .channels: return "Channels"
+        }
+    }
 }
 
 // MARK: - Main View
@@ -189,14 +207,39 @@ struct YouTubeSearchView: View {
     @State private var toastTask: Task<Void, Never>?
     @State private var searchTask: Task<Void, Never>?
     @State private var autoPlayNextSearch = false
+    @State private var searchMode: SearchMode = .songs
+    @State private var channels: [YouTubeChannel] = []
+    @State private var channelSearchTask: Task<Void, Never>?
+    @State private var navPath = NavigationPath()
 
     @ObservedObject var library: AudioLibrary
 
     var body: some View {
-        NavigationStack {
-            List(results) { result in
-                resultRow(result)
-                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+        NavigationStack(path: $navPath) {
+            List {
+                Picker("", selection: $searchMode) {
+                    ForEach(SearchMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+                if searchMode == .songs {
+                    ForEach(results) { result in
+                        resultRow(result)
+                            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                    }
+                } else {
+                    ForEach(channels) { channel in
+                        NavigationLink(value: channel.id) {
+                            channelRow(channel)
+                        }
+                        .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: player.currentTrack != nil ? 80 : 0)
@@ -204,27 +247,51 @@ struct YouTubeSearchView: View {
             .scrollContentBackground(.hidden)
             .background { TabBackgroundDecoration() }
             .navigationTitle("Search")
-            .searchable(text: $query, prompt: "Search songs, artists…")
+            .searchable(
+                text: $query,
+                prompt: searchMode == .songs ? "Search songs, artists…" : "Search channels…"
+            )
             .onChange(of: query) { _, newValue in
                 searchTask?.cancel()
+                channelSearchTask?.cancel()
                 guard !newValue.trimmingCharacters(in: .whitespaces).isEmpty else {
                     results = []
+                    channels = []
                     return
                 }
-                searchTask = Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(500))
-                    guard !Task.isCancelled else { return }
-                    await performSearch()
-                    if autoPlayNextSearch {
-                        autoPlayNextSearch = false
-                        if let first = results.first,
-                           let index = results.firstIndex(where: { $0.id == first.id }) {
-                            player.setYouTubeQueue(results, startingAt: index)
-                        }
-                        if let first = results.first {
-                            await playResult(first)
+                if searchMode == .songs {
+                    searchTask = Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(500))
+                        guard !Task.isCancelled else { return }
+                        await performSearch()
+                        if autoPlayNextSearch {
+                            autoPlayNextSearch = false
+                            if let first = results.first,
+                               let index = results.firstIndex(where: { $0.id == first.id }) {
+                                player.setYouTubeQueue(results, startingAt: index)
+                            }
+                            if let first = results.first { await playResult(first) }
                         }
                     }
+                } else {
+                    channelSearchTask = Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(500))
+                        guard !Task.isCancelled else { return }
+                        await performChannelSearch()
+                    }
+                }
+            }
+            .onChange(of: searchMode) { _, _ in
+                searchTask?.cancel()
+                channelSearchTask?.cancel()
+                navPath = NavigationPath()
+                results = []
+                channels = []
+                guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                if searchMode == .songs {
+                    searchTask = Task { @MainActor in await performSearch() }
+                } else {
+                    channelSearchTask = Task { @MainActor in await performChannelSearch() }
                 }
             }
             .scrollIndicators(.visible)
@@ -232,19 +299,31 @@ struct YouTubeSearchView: View {
             .overlay(alignment: .bottom) { toastOverlay }
             .onChange(of: library.tracks) { _, tracks in
                 let savedTitles = Set(tracks.map { $0.title })
-                downloadedIDs = downloadedIDs.filter { id in
+                let updatedIDs = downloadedIDs.filter { (id: String) -> Bool in
                     results.first(where: { $0.id == id }).map { savedTitles.contains($0.title) } ?? false
                 }
+                downloadedIDs = updatedIDs
             }
             .onReceive(IntentBridge.shared.$pendingYouTubeSearch.compactMap { $0 }) { searchQuery in
                 IntentBridge.shared.pendingYouTubeSearch = nil
+                searchMode = .songs
                 query = searchQuery
-                // onChange(of: query) handles the search — no second task needed
             }
             .onReceive(IntentBridge.shared.$pendingYouTubePlayReady.compactMap { $0 }) { searchQuery in
                 IntentBridge.shared.pendingYouTubePlayReady = nil
+                searchMode = .songs
                 autoPlayNextSearch = true
                 query = searchQuery
+            }
+            .navigationDestination(for: String.self) { channelID in
+                if let channel = channels.first(where: { $0.id == channelID }) {
+                    ChannelPlaylistsView(channel: channel, library: library)
+                        .environmentObject(player)
+                }
+            }
+            .navigationDestination(for: YouTubePlaylist.self) { playlist in
+                PlaylistItemsView(playlist: playlist, library: library)
+                    .environmentObject(player)
             }
         }
     }
@@ -283,6 +362,46 @@ struct YouTubeSearchView: View {
         )
     }
 
+    // MARK: - Channel Row
+
+    @ViewBuilder
+    private func channelRow(_ channel: YouTubeChannel) -> some View {
+        HStack(spacing: 12) {
+            AsyncImage(url: URL(string: channel.thumbnailURL)) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().aspectRatio(contentMode: .fill)
+                default:
+                    Color(white: 0.2)
+                        .overlay(
+                            Image(systemName: "person.crop.rectangle.stack")
+                                .foregroundStyle(Color(white: 0.5))
+                        )
+                }
+            }
+            .frame(width: 48, height: 48)
+            .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(channel.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                if !channel.subscriberCount.isEmpty {
+                    Text(channel.subscriberCount)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if !channel.description.isEmpty {
+                    Text(channel.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+        }
+        .contentShape(Rectangle())
+    }
+
     // MARK: - Stream Action
 
     private func playResult(_ result: YouTubeResult) async {
@@ -301,10 +420,13 @@ struct YouTubeSearchView: View {
                 isLoadingID = nil
                 return
             }
+            let artist = stream.artist.trimmingCharacters(in: .whitespaces).isEmpty
+                ? result.artistName
+                : stream.artist
             player.playYouTube(
                 url: url,
                 title: stream.title,
-                artist: stream.artist,
+                artist: artist,
                 duration: stream.duration,
                 videoID: result.id
             )
@@ -335,6 +457,24 @@ struct YouTubeSearchView: View {
         isSearching = false
     }
 
+    // MARK: - Channel Search
+
+    private func performChannelSearch() async {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        isSearching = true
+        channels = []
+        do {
+            channels = try await YouTubeService.searchChannels(query)
+        } catch {
+            isSearching = false
+            if error is CancellationError { return }
+            if (error as? URLError)?.code == .cancelled { return }
+            showToast(.error(error.localizedDescription))
+            return
+        }
+        isSearching = false
+    }
+
     // MARK: - Toast
 
     private func showToast(_ type: ToastType) {
@@ -351,14 +491,26 @@ struct YouTubeSearchView: View {
     private var overlayView: some View {
         if isSearching {
             ProgressView("Searching…")
-        } else if results.isEmpty && !query.isEmpty {
-            ContentUnavailableView("No results", systemImage: "magnifyingglass")
-        } else if results.isEmpty {
-            ContentUnavailableView(
-                "Search on YouTube",
-                systemImage: "play.rectangle",
-                description: Text("Type a song or artist to get started")
-            )
+        } else if searchMode == .songs {
+            if results.isEmpty && !query.isEmpty {
+                ContentUnavailableView("No results", systemImage: "magnifyingglass")
+            } else if results.isEmpty {
+                ContentUnavailableView(
+                    "Search on YouTube",
+                    systemImage: "play.rectangle",
+                    description: Text("Type a song or artist to get started")
+                )
+            }
+        } else {
+            if channels.isEmpty && !query.isEmpty {
+                ContentUnavailableView("No channels found", systemImage: "magnifyingglass")
+            } else if channels.isEmpty {
+                ContentUnavailableView(
+                    "Find YouTube Channels",
+                    systemImage: "person.crop.rectangle.stack",
+                    description: Text("Search for a channel to browse its playlists")
+                )
+            }
         }
     }
 
@@ -530,11 +682,16 @@ struct YouTubeTrackOptionsSheet: View {
     private func saveToLibrary() async {
         onDownloadStarted()
         do {
-            let tempURL = try await StreamService.downloadAudioToTemp(for: result.id, title: result.title)
+            let tempURL = try await StreamService.downloadAudioToTemp(for: result.id, title: result.title, artist: result.artistName)
             let fileName = tempURL.lastPathComponent
             try library.copyToDownloads(from: tempURL, fileName: fileName)
             await library.loadExistingTracks()
             let savedURL = library.downloadsDirectory.appendingPathComponent(fileName)
+            if let track = library.tracks.first(where: { $0.url.lastPathComponent == fileName }),
+               (track.artist?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty,
+               !result.artistName.isEmpty {
+                library.updateTrackMetadata(track, title: track.title, artist: result.artistName)
+            }
             onDownloaded(savedURL)
             isSavingToLibrary = false
             dismiss()
@@ -551,7 +708,7 @@ struct YouTubeTrackOptionsSheet: View {
     // Downloads to a temp file and presents the iOS Save to Files / share sheet
     private func saveToFiles() async {
         do {
-            let tempURL = try await StreamService.downloadAudioToTemp(for: result.id, title: result.title)
+            let tempURL = try await StreamService.downloadAudioToTemp(for: result.id, title: result.title, artist: result.artistName)
             isSavingToFiles = false
             presentShareSheet(url: tempURL)
         } catch {
@@ -635,15 +792,22 @@ private struct YouTubeAddToPlaylistSheet: View {
         onDownloadStarted()
         Task {
             do {
-                let tempURL = try await StreamService.downloadAudioToTemp(for: result.id, title: result.title)
+                let tempURL = try await StreamService.downloadAudioToTemp(for: result.id, title: result.title, artist: result.artistName)
                 let fileName = tempURL.lastPathComponent
                 try library.copyToDownloads(from: tempURL, fileName: fileName)
                 await library.loadExistingTracks()
                 let savedURL = library.downloadsDirectory.appendingPathComponent(fileName)
                 // Match by filename — more reliable than full URL comparison
-                if let track = library.tracks.first(where: { $0.url.lastPathComponent == fileName }),
-                   let target = library.playlists.first(where: { $0.id == playlistID }) {
-                    library.addTrack(track, to: target)
+                if let track = library.tracks.first(where: { $0.url.lastPathComponent == fileName }) {
+                    if (track.artist?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty,
+                       !result.artistName.isEmpty {
+                        library.updateTrackMetadata(track, title: track.title, artist: result.artistName)
+                    }
+                    if let target = library.playlists.first(where: { $0.id == playlistID }) {
+                        // Use the (possibly updated) track from the library
+                        let updatedTrack = library.tracks.first(where: { $0.url.lastPathComponent == fileName }) ?? track
+                        library.addTrack(updatedTrack, to: target)
+                    }
                 }
                 // Mark as saved in the search results (Add to saved songs state)
                 onDownloaded(savedURL)
