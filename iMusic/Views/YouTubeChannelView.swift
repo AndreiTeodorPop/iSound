@@ -15,9 +15,16 @@ struct ChannelPlaylistsView: View {
     @State private var toastTask: Task<Void, Never>?
     @State private var playlistOptions: YouTubePlaylist? = nil
     @State private var navigatingTo: YouTubePlaylist? = nil
+    @State private var searchText = ""
+
+    private var filteredPlaylists: [YouTubePlaylist] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return playlists }
+        return playlists.filter { $0.title.localizedCaseInsensitiveContains(q) }
+    }
 
     var body: some View {
-        List(playlists) { playlist in
+        List(filteredPlaylists) { playlist in
             HStack(spacing: 0) {
                 Button {
                     navigatingTo = playlist
@@ -40,8 +47,9 @@ struct ChannelPlaylistsView: View {
         }
         .scrollContentBackground(.hidden)
         .background { TabBackgroundDecoration() }
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search playlists")
         .navigationTitle(channel.title)
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .scrollIndicators(.visible)
         .overlay { overlayView }
         .overlay(alignment: .bottom) { toastOverlay }
@@ -260,9 +268,15 @@ struct PlaylistItemsView: View {
     var body: some View {
         ScrollViewReader { proxy in
         List {
-            // Song count header
+            // Playlist name + song count header
             if !items.isEmpty {
                 Section {
+                    Text(playlist.title)
+                        .font(.largeTitle).bold()
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 8)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 4, trailing: 16))
+                        .listRowBackground(Color.clear)
                     HStack(spacing: 6) {
                         Image(systemName: "person.circle.fill")
                             .foregroundStyle(.secondary)
@@ -363,7 +377,7 @@ struct PlaylistItemsView: View {
         .scrollContentBackground(.hidden)
         .background { TabBackgroundDecoration() }
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search songs")
-        .navigationTitle(playlist.title)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .scrollIndicators(sortOrder.isAlphabetical ? .hidden : .visible)
         .overlay { overlayView }
