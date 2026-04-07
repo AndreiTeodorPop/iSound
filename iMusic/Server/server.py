@@ -35,17 +35,15 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
-# Profile 1: mweb — mobile web, lowest bot-detection threshold on cloud IPs.
-# Profile 2: tv_embedded — YouTube TV embedded player API, less aggressively filtered.
-# Profile 3: web with cookies — full web client, only viable when cookies are present.
-# Profile 4: ios — Apple's API (HLS, pre-signed URLs, no JS decryption).
-# Profile 5: android — Android client, different User-Agent fingerprint.
+# (client_list, use_cookies)
+# Browser cookies work with web-based clients only; ios/android API endpoints
+# reject browser cookies and fail with "no player response".
 _CLIENT_PROFILES = [
-    (["mweb"], False),
-    (["tv_embedded"], False),
-    (["web"], True),
-    (["ios"], False),
-    (["android"], False),
+    (["mweb"],        True),
+    (["tv_embedded"], True),
+    (["web"],         True),
+    (["ios"],         False),
+    (["android"],     False),
 ]
 
 # Prefer direct HTTPS m4a streams (non-fragmented, non-DASH, non-HLS).
@@ -53,7 +51,6 @@ _CLIENT_PROFILES = [
 # resulting in silence in the second half of playback.
 # protocol=https selects progressive-download streams that proxy cleanly.
 _FORMAT_FALLBACKS = [
-    "bestaudio[ext=m4a][protocol=https]/bestaudio[ext=m4a]/bestaudio[protocol=https]/bestaudio[ext=webm]/bestaudio/best",
     "bestaudio[ext=m4a]/bestaudio/best",
     "best",
 ]
@@ -72,15 +69,13 @@ def _fetch_info_with_retry(video_id, max_retries=3):
     last_err = None
 
     for clients, use_cookies in _CLIENT_PROFILES:
-        # mweb/ios/android use pre-signed or token-free URLs — skip JS decryption entirely.
-        # web with cookies goes straight to innertube API (skip webpage fetch only).
-        no_js_clients = {"mweb", "ios", "android"}
+        # ios/android return pre-signed URLs — no JS needed.
+        # All other clients need JS to decrypt the n-challenge / signature.
+        no_js_clients = {"ios", "android"}
         if any(c in no_js_clients for c in clients):
             player_skip = ["webpage", "configs", "js"]
-        elif use_cookies:
-            player_skip = ["webpage"]
         else:
-            player_skip = ["webpage", "configs", "js"]
+            player_skip = ["webpage"]
 
         base_opts = {
             "quiet": True,
@@ -94,7 +89,7 @@ def _fetch_info_with_retry(video_id, max_retries=3):
                 }
             },
         }
-        if os.path.exists(COOKIES_FILE):
+        if use_cookies and os.path.exists(COOKIES_FILE):
             base_opts["cookiefile"] = COOKIES_FILE
 
         for fmt in _FORMAT_FALLBACKS:
@@ -147,13 +142,7 @@ def _fetch_info_pytubefix(video_id):
 
     for client in _PYTUBEFIX_CLIENTS:
         try:
-            kwargs = {"client": client}
-            if os.path.exists(COOKIES_FILE):
-                kwargs["use_oauth"] = False
-                kwargs["allow_oauth_cache"] = False
-                # pytubefix accepts a cookies file via the cookiepath parameter
-                kwargs["cookiepath"] = COOKIES_FILE
-            yt = YouTube(url, **kwargs)
+            yt = YouTube(url, client=client)
             # Prefer AAC/m4a — natively supported by iOS AVPlayer.
             stream = yt.streams.filter(only_audio=True, mime_type="audio/mp4").order_by("abr").last()
             if not stream:
