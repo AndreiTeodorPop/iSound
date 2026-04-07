@@ -60,12 +60,11 @@ _FORMAT_FALLBACKS = [
 
 
 class _QuietLogger:
-    """Fully silent yt-dlp logger — yt-dlp failures are expected and handled
-    by the Invidious fallback, so we don't need noise in the console."""
+    """Logs only errors from yt-dlp so we can see which clients/formats fail."""
     def debug(self, msg): pass
     def info(self, msg): pass
     def warning(self, msg): pass
-    def error(self, msg): pass
+    def error(self, msg): print(f"[yt-dlp] {msg}", flush=True)
 
 
 def _fetch_info_with_retry(video_id, max_retries=3):
@@ -95,17 +94,20 @@ def _fetch_info_with_retry(video_id, max_retries=3):
                 }
             },
         }
-        if use_cookies and os.path.exists(COOKIES_FILE):
+        if os.path.exists(COOKIES_FILE):
             base_opts["cookiefile"] = COOKIES_FILE
 
         for fmt in _FORMAT_FALLBACKS:
             opts = {**base_opts, "format": fmt}
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    return ydl.extract_info(url, download=False)
+                    info = ydl.extract_info(url, download=False)
+                    print(f"[yt-dlp/{clients[0]}] OK", flush=True)
+                    return info
             except Exception as e:
                 last_err = e
                 err_str = str(e)
+                print(f"[yt-dlp/{clients[0]}] {err_str[:120]}", flush=True)
                 if "Requested format is not available" in err_str or \
                    "Only images are available" in err_str or \
                    "Sign in to confirm" in err_str:
@@ -127,16 +129,16 @@ def _fetch_info_pytubefix(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     # Client order tuned for cloud IPs (Railway / Render / Fly):
-    # MWEB — mobile web, lowest bot-detection on datacenter IPs (2025+).
-    # TV_EMBED — embedded TV player, different API path than web.
-    # IOS — Apple API, pre-signed URLs, no JS needed.
-    # ANDROID_EMBED — embedded Android client, different fingerprint.
-    # ANDROID_VR / ANDROID_MUSIC / WEB_EMBED / WEB — kept as last resorts.
+    # MWEB        — mobile web, lowest bot-detection threshold on datacenter IPs.
+    # ANDROID     — base Android client, different UA + API path from ANDROID_VR.
+    # WEB_CREATOR — YouTube Studio client, rarely rate-limited.
+    # ANDROID_VR / ANDROID_MUSIC / WEB_EMBED / WEB — last resorts.
+    # Removed: TV_EMBED (blocked: "no longer supported"), IOS (HTTP 400),
+    #          ANDROID_EMBED (not a valid pytubefix client name → KeyError).
     _PYTUBEFIX_CLIENTS = [
         "MWEB",
-        "TV_EMBED",
-        "IOS",
-        "ANDROID_EMBED",
+        "ANDROID",
+        "WEB_CREATOR",
         "ANDROID_VR",
         "ANDROID_MUSIC",
         "WEB_EMBED",
@@ -145,7 +147,13 @@ def _fetch_info_pytubefix(video_id):
 
     for client in _PYTUBEFIX_CLIENTS:
         try:
-            yt = YouTube(url, client=client)
+            kwargs = {"client": client}
+            if os.path.exists(COOKIES_FILE):
+                kwargs["use_oauth"] = False
+                kwargs["allow_oauth_cache"] = False
+                # pytubefix accepts a cookies file via the cookiepath parameter
+                kwargs["cookiepath"] = COOKIES_FILE
+            yt = YouTube(url, **kwargs)
             # Prefer AAC/m4a — natively supported by iOS AVPlayer.
             stream = yt.streams.filter(only_audio=True, mime_type="audio/mp4").order_by("abr").last()
             if not stream:
