@@ -35,10 +35,15 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
-# All clients now require cookies — the server IP is fully flagged by YouTube.
+# (client_list, use_cookies)
+# Browser cookies work with web-based clients only; ios/android API endpoints
+# reject browser cookies and fail with "no player response".
 _CLIENT_PROFILES = [
-    (["android"], True),
-    (["mweb"],    True),
+    (["mweb"],        True),
+    (["tv_embedded"], True),
+    (["web"],         True),
+    (["ios"],         False),
+    (["android"],     False),
 ]
 
 # Prefer direct HTTPS m4a streams (non-fragmented, non-DASH, non-HLS).
@@ -46,7 +51,7 @@ _CLIENT_PROFILES = [
 # resulting in silence in the second half of playback.
 # protocol=https selects progressive-download streams that proxy cleanly.
 _FORMAT_FALLBACKS = [
-    "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[ext=mp4]/best",
+    "bestaudio[ext=m4a]/bestaudio/best",
     "best",
 ]
 
@@ -64,12 +69,13 @@ def _fetch_info_with_retry(video_id, max_retries=3):
     last_err = None
 
     for clients, use_cookies in _CLIENT_PROFILES:
-        # All clients need JS when cookies are present (n-param decryption).
-        # Without cookies, android/ios use pre-signed URLs and can skip JS.
-        if use_cookies:
-            player_skip = ["webpage"]
-        else:
+        # ios/android return pre-signed URLs — no JS needed.
+        # All other clients need JS to decrypt the n-challenge / signature.
+        no_js_clients = {"ios", "android"}
+        if any(c in no_js_clients for c in clients):
             player_skip = ["webpage", "configs", "js"]
+        else:
+            player_skip = ["webpage"]
 
         base_opts = {
             "quiet": True,
@@ -117,10 +123,21 @@ def _fetch_info_pytubefix(video_id):
 
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # ANDROID confirmed working; MWEB kept as fallback.
+    # Client order tuned for cloud IPs (Railway / Render / Fly):
+    # MWEB        — mobile web, lowest bot-detection threshold on datacenter IPs.
+    # ANDROID     — base Android client, different UA + API path from ANDROID_VR.
+    # WEB_CREATOR — YouTube Studio client, rarely rate-limited.
+    # ANDROID_VR / ANDROID_MUSIC / WEB_EMBED / WEB — last resorts.
+    # Removed: TV_EMBED (blocked: "no longer supported"), IOS (HTTP 400),
+    #          ANDROID_EMBED (not a valid pytubefix client name → KeyError).
     _PYTUBEFIX_CLIENTS = [
-        "ANDROID",
         "MWEB",
+        "ANDROID",
+        "WEB_CREATOR",
+        "ANDROID_VR",
+        "ANDROID_MUSIC",
+        "WEB_EMBED",
+        "WEB",
     ]
 
     for client in _PYTUBEFIX_CLIENTS:
