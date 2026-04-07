@@ -35,11 +35,9 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
-# (client_list, use_cookies)
-# android is the only client confirmed working on this server IP.
-# mweb is kept as fallback with cookies in case android gets blocked.
+# All clients now require cookies — the server IP is fully flagged by YouTube.
 _CLIENT_PROFILES = [
-    (["android"], False),
+    (["android"], True),
     (["mweb"],    True),
 ]
 
@@ -48,7 +46,7 @@ _CLIENT_PROFILES = [
 # resulting in silence in the second half of playback.
 # protocol=https selects progressive-download streams that proxy cleanly.
 _FORMAT_FALLBACKS = [
-    "bestaudio[ext=m4a]/bestaudio/best",
+    "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[ext=mp4]/best",
     "best",
 ]
 
@@ -66,13 +64,12 @@ def _fetch_info_with_retry(video_id, max_retries=3):
     last_err = None
 
     for clients, use_cookies in _CLIENT_PROFILES:
-        # ios/android return pre-signed URLs — no JS needed.
-        # All other clients need JS to decrypt the n-challenge / signature.
-        no_js_clients = {"ios", "android"}
-        if any(c in no_js_clients for c in clients):
-            player_skip = ["webpage", "configs", "js"]
-        else:
+        # All clients need JS when cookies are present (n-param decryption).
+        # Without cookies, android/ios use pre-signed URLs and can skip JS.
+        if use_cookies:
             player_skip = ["webpage"]
+        else:
+            player_skip = ["webpage", "configs", "js"]
 
         base_opts = {
             "quiet": True,
