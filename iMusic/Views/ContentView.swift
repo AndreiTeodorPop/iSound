@@ -72,11 +72,11 @@ struct ContentView: View {
     @State private var showingRenameAlert = false
     @State private var playlistToDelete: Playlist?
     @State private var showingDeletePlaylistConfirm = false
-    @State private var playlistSortOrder: PlaylistSortOrder = .custom
+    @AppStorage("playlistSortOrder") private var playlistSortOrder: PlaylistSortOrder = .custom
     @State private var showingSortSheet = false
     @State private var showingDuplicatePlaylistAlert = false
 
-    enum PlaylistSortOrder: CaseIterable {
+    enum PlaylistSortOrder: String, CaseIterable {
         case custom, alphabetically, byTracksCount, fromNewest
 
         var label: String {

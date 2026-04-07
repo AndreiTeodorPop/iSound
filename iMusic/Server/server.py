@@ -36,14 +36,11 @@ CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
 # (client_list, use_cookies)
-# Browser cookies work with web-based clients only; ios/android API endpoints
-# reject browser cookies and fail with "no player response".
+# android is the only client confirmed working on this server IP.
+# mweb is kept as fallback with cookies in case android gets blocked.
 _CLIENT_PROFILES = [
-    (["mweb"],        True),
-    (["tv_embedded"], True),
-    (["web"],         True),
-    (["ios"],         False),
-    (["android"],     False),
+    (["android"], False),
+    (["mweb"],    True),
 ]
 
 # Prefer direct HTTPS m4a streams (non-fragmented, non-DASH, non-HLS).
@@ -123,21 +120,10 @@ def _fetch_info_pytubefix(video_id):
 
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # Client order tuned for cloud IPs (Railway / Render / Fly):
-    # MWEB        — mobile web, lowest bot-detection threshold on datacenter IPs.
-    # ANDROID     — base Android client, different UA + API path from ANDROID_VR.
-    # WEB_CREATOR — YouTube Studio client, rarely rate-limited.
-    # ANDROID_VR / ANDROID_MUSIC / WEB_EMBED / WEB — last resorts.
-    # Removed: TV_EMBED (blocked: "no longer supported"), IOS (HTTP 400),
-    #          ANDROID_EMBED (not a valid pytubefix client name → KeyError).
+    # ANDROID confirmed working; MWEB kept as fallback.
     _PYTUBEFIX_CLIENTS = [
-        "MWEB",
         "ANDROID",
-        "WEB_CREATOR",
-        "ANDROID_VR",
-        "ANDROID_MUSIC",
-        "WEB_EMBED",
-        "WEB",
+        "MWEB",
     ]
 
     for client in _PYTUBEFIX_CLIENTS:
