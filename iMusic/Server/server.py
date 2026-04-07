@@ -35,13 +35,17 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
-# Profile 1: web with cookies + bgutil PO token provider for bot detection bypass.
+# Profile 1: mweb — mobile web, lowest bot-detection threshold on cloud IPs.
 # Profile 2: tv_embedded — YouTube TV embedded player API, less aggressively filtered.
-# Profile 3: ios — Apple's API (HLS, no signature needed), last resort.
+# Profile 3: web with cookies — full web client, only viable when cookies are present.
+# Profile 4: ios — Apple's API (HLS, pre-signed URLs, no JS decryption).
+# Profile 5: android — Android client, different User-Agent fingerprint.
 _CLIENT_PROFILES = [
-    (["web"], True),
+    (["mweb"], False),
     (["tv_embedded"], False),
+    (["web"], True),
     (["ios"], False),
+    (["android"], False),
 ]
 
 # Prefer direct HTTPS m4a streams (non-fragmented, non-DASH, non-HLS).
@@ -69,10 +73,15 @@ def _fetch_info_with_retry(video_id, max_retries=3):
     last_err = None
 
     for clients, use_cookies in _CLIENT_PROFILES:
-        # Skip fetching the main YouTube webpage (most rate-limited endpoint).
-        # With cookies, go straight to innertube. Without cookies + ios client,
-        # also skip JS so we rely on pre-signed HLS URLs that need no decryption.
-        player_skip = ["webpage"] if use_cookies else ["webpage", "configs", "js"]
+        # mweb/ios/android use pre-signed or token-free URLs — skip JS decryption entirely.
+        # web with cookies goes straight to innertube API (skip webpage fetch only).
+        no_js_clients = {"mweb", "ios", "android"}
+        if any(c in no_js_clients for c in clients):
+            player_skip = ["webpage", "configs", "js"]
+        elif use_cookies:
+            player_skip = ["webpage"]
+        else:
+            player_skip = ["webpage", "configs", "js"]
 
         base_opts = {
             "quiet": True,
@@ -117,10 +126,17 @@ def _fetch_info_pytubefix(video_id):
 
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # ANDROID_VR is the only client that reliably bypasses bot detection on cloud IPs.
-    # Other clients (TV_EMBED=429, WEB/ANDROID_VR_BOT=bot detected, IOS=400,
-    # WEB_EMBED=unavailable, ANDROID_MUSIC=login required) are kept as fallbacks.
+    # Client order tuned for cloud IPs (Railway / Render / Fly):
+    # MWEB — mobile web, lowest bot-detection on datacenter IPs (2025+).
+    # TV_EMBED — embedded TV player, different API path than web.
+    # IOS — Apple API, pre-signed URLs, no JS needed.
+    # ANDROID_EMBED — embedded Android client, different fingerprint.
+    # ANDROID_VR / ANDROID_MUSIC / WEB_EMBED / WEB — kept as last resorts.
     _PYTUBEFIX_CLIENTS = [
+        "MWEB",
+        "TV_EMBED",
+        "IOS",
+        "ANDROID_EMBED",
         "ANDROID_VR",
         "ANDROID_MUSIC",
         "WEB_EMBED",
