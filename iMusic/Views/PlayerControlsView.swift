@@ -71,9 +71,7 @@ struct PlayerControlsView: View {
                 albumArtPlaceholder
 
                 let title = player.currentTrack?.title ?? "Not Playing"
-                let artist = player.currentTrack?.artist ?? ""
-                let isYouTube = player.currentTrack?.youtubeVideoID != nil
-                Text(artist.isEmpty || isYouTube ? title : "\(artist) - \(title)")
+                Text(title)
                     .font(.subheadline).bold()
                     .lineLimit(1)
 

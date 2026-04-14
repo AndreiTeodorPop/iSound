@@ -681,9 +681,18 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             let artist = stream.artist.trimmingCharacters(in: .whitespaces).isEmpty
                 ? result.artistName
                 : stream.artist
+            // Strip YouTube-style suffixes ("Artist - Topic") then prepend to title
+            // if the title doesn't already start with the artist name.
+            let cleanArtist = artist.lowercased().hasSuffix(" - topic")
+                ? String(artist.dropLast(" - topic".count)).trimmingCharacters(in: .whitespaces)
+                : artist
+            let displayTitle = !cleanArtist.isEmpty &&
+                !result.title.lowercased().hasPrefix(cleanArtist.lowercased())
+                ? "\(cleanArtist) - \(result.title)"
+                : result.title
             playYouTube(
                 url: url,
-                title: result.title,
+                title: displayTitle,
                 artist: artist,
                 duration: stream.duration,
                 videoID: result.id

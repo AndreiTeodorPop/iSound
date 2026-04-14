@@ -492,8 +492,9 @@ struct PlaylistItemsView: View {
         guard isLoadingID == nil else { return }
         isLoadingID = result.id
 
-        if let index = items.firstIndex(where: { $0.id == result.id }) {
-            player.setYouTubeQueue(items, startingAt: index)
+        // Use the currently displayed order (respects sort + search filter) as the queue
+        if let index = filteredItems.firstIndex(where: { $0.id == result.id }) {
+            player.setYouTubeQueue(filteredItems, startingAt: index)
         }
 
         do {

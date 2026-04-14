@@ -88,9 +88,7 @@ struct NowPlayingView: View {
 
                 VStack(spacing: 3) {
                     let title = player.currentTrack?.title ?? "Unknown"
-                    let artist = player.currentTrack?.artist ?? ""
-                    let isYouTube = player.currentTrack?.youtubeVideoID != nil
-                    Text(artist.isEmpty || isYouTube ? title : "\(artist) - \(title)")
+                    Text(title)
                         .font(.title2.bold())
                         .multilineTextAlignment(.center)
                         .lineLimit(2)

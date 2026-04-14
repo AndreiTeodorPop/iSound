@@ -171,7 +171,13 @@ struct YouTubeResultRow: View {
                 if apiDuration == nil, let streamInfo = try? await StreamService.getStreamURL(for: result.id) {
                     apiDuration = streamInfo.duration > 0 ? streamInfo.duration : nil
                 }
-                let artist = result.artistName.isEmpty ? track.artist : result.artistName
+                let rawArtist = result.artistName
+                let cleanArtist = rawArtist.lowercased().hasSuffix(" - topic")
+                    ? String(rawArtist.dropLast(" - topic".count)).trimmingCharacters(in: .whitespaces)
+                    : rawArtist
+                let titleHasArtist = !cleanArtist.isEmpty &&
+                    track.title.lowercased().hasPrefix(cleanArtist.lowercased())
+                let artist: String? = titleHasArtist ? nil : (cleanArtist.isEmpty ? track.artist : cleanArtist)
                 library.updateTrackMetadata(track, title: track.title, artist: artist, duration: apiDuration)
             }
             onDownloaded(savedURL)
@@ -699,7 +705,13 @@ struct YouTubeTrackOptionsSheet: View {
                 if apiDuration == nil, let streamInfo = try? await StreamService.getStreamURL(for: result.id) {
                     apiDuration = streamInfo.duration > 0 ? streamInfo.duration : nil
                 }
-                let artist = result.artistName.isEmpty ? track.artist : result.artistName
+                let rawArtist = result.artistName
+                let cleanArtist = rawArtist.lowercased().hasSuffix(" - topic")
+                    ? String(rawArtist.dropLast(" - topic".count)).trimmingCharacters(in: .whitespaces)
+                    : rawArtist
+                let titleHasArtist = !cleanArtist.isEmpty &&
+                    track.title.lowercased().hasPrefix(cleanArtist.lowercased())
+                let artist: String? = titleHasArtist ? nil : (cleanArtist.isEmpty ? track.artist : cleanArtist)
                 library.updateTrackMetadata(track, title: track.title, artist: artist, duration: apiDuration)
             }
             onDownloaded(savedURL)
