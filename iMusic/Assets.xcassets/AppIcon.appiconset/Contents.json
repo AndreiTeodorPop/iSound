@@ -1,7 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "iMusic dark.png",
+      "filename" : "iMusic light.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -13,7 +13,7 @@
           "value" : "dark"
         }
       ],
-      "filename" : "iMusic light.png",
+      "filename" : "iMusic dark.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
