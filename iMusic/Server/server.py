@@ -51,7 +51,9 @@ _CLIENT_PROFILES = [
 # protocol=https selects progressive-download streams that proxy cleanly.
 _FORMAT_FALLBACKS = [
     "bestaudio[ext=m4a]/bestaudio/best",
+    "bestaudio",
     "best",
+    "worst",  # last resort — any stream at all
 ]
 
 
