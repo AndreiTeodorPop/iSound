@@ -7,6 +7,10 @@ app = 'imusic'
 primary_region = 'ams'
 
 [build]
+  dockerfile = "Dockerfile"
+
+[env]
+  WORKERS = "1"
 
 [http_service]
   internal_port = 8080
@@ -20,4 +24,3 @@ primary_region = 'ams'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 256
