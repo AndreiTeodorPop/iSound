@@ -35,12 +35,14 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
-# Cookie-based clients first (bypass bot detection on datacenter IPs),
-# then android as a cookieless fallback.
+# (client_list, use_cookies)
+# Browser cookies work with web-based clients only; ios/android API endpoints
+# reject browser cookies and fail with "no player response".
 _CLIENT_PROFILES = [
     (["mweb"],        True),
-    (["web"],         True),
     (["tv_embedded"], True),
+    (["web"],         True),
+    (["ios"],         False),
     (["android"],     False),
 ]
 
