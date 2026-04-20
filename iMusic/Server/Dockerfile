@@ -18,8 +18,7 @@ COPY . .
 # caching never leaves an outdated yt-dlp (YouTube breaks old versions quickly).
 RUN pip install --no-cache-dir --quiet --root-user-action=ignore --upgrade pip && \
     pip install --no-cache-dir --quiet --root-user-action=ignore -r requirements.txt && \
-    pip install --no-cache-dir --quiet --root-user-action=ignore --upgrade yt-dlp && \
-    bgutil-ytdlp-pot-provider install
+    pip install --no-cache-dir --quiet --root-user-action=ignore --upgrade yt-dlp
 
 # Persistent yt-dlp cache (stores the YouTube JS player so signature solving
 # works without re-downloading on every container restart).
@@ -32,4 +31,4 @@ ENV PORT=8080
 ENV WORKERS=3
 
 # Shell form ensures env variables are expanded
-CMD ["sh", "-c", "gunicorn server:app --bind 0.0.0.0:${PORT:-8080} --workers ${WORKERS:-3} --timeout 300"]
+CMD ["sh", "-c", "python -m bgutil_ytdlp_pot_provider serve & gunicorn server:app --bind 0.0.0.0:${PORT:-8080} --workers ${WORKERS:-1} --timeout 300"]
