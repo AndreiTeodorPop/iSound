@@ -41,8 +41,6 @@ CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 _CLIENT_PROFILES = [
     (["mweb"],        True),
     (["tv_embedded"], True),
-    (["web"],         True),
-    (["ios"],         False),
     (["android"],     False),
 ]
 
