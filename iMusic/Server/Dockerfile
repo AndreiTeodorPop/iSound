@@ -31,4 +31,4 @@ ENV PORT=8080
 ENV WORKERS=3
 
 # Shell form ensures env variables are expanded
-CMD ["sh", "-c", "python -m bgutil_ytdlp_pot_provider serve & gunicorn server:app --bind 0.0.0.0:${PORT:-8080} --workers ${WORKERS:-1} --timeout 300"]
+CMD ["sh", "-c", "gunicorn server:app --bind 0.0.0.0:${PORT:-8080} --workers ${WORKERS:-1} --timeout 300"]
