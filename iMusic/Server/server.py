@@ -104,10 +104,11 @@ def _fetch_info_with_retry(video_id, max_retries=3):
                 last_err = e
                 err_str = str(e)
                 print(f"[yt-dlp/{clients[0]}] {err_str[:120]}", flush=True)
-                if "Requested format is not available" in err_str or \
-                   "Only images are available" in err_str or \
-                   "Sign in to confirm" in err_str:
-                    break  # this profile won't work, try next profile
+                if "Sign in to confirm" in err_str:
+                    break  # IP/auth blocked — no point trying other formats
+                if "Only images are available" in err_str:
+                    break  # not a video — skip profile
+                # "Requested format is not available" → try next format in fallback list
                 # 429: brief wait then try next format
                 if "429" in err_str:
                     time.sleep(3)
