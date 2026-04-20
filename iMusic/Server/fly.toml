@@ -1,0 +1,36 @@
+# fly.toml — Fly.io deployment config for iMusic server
+# Docs: https://fly.io/docs/reference/configuration/
+
+app = "imusic-server"   # ← change this to your chosen app name (must be globally unique on Fly)
+primary_region = "ams"  # Amsterdam — change to nearest region (see: fly platform regions)
+
+[build]
+  # Fly will build using the Dockerfile in this directory
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT    = "8080"
+  WORKERS = "2"
+  YTDLP_CACHE_DIR = "/data/yt-dlp-cache"  # persisted on the Fly volume below
+
+[http_service]
+  internal_port       = 8080
+  force_https         = true
+  auto_stop_machines  = false   # keep machine always-on (free tier allows 1 always-on VM)
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type       = "requests"
+    hard_limit = 25
+    soft_limit = 20
+
+# Persistent volume — stores the yt-dlp JS player cache across deploys/restarts.
+# 1 GB is well within Fly's free 3 GB allowance.
+[mounts]
+  source      = "ytdlp_cache"
+  destination = "/data"
+
+[[vm]]
+  memory = "512mb"   # ffmpeg needs headroom; free tier gives 256MB — bump to 512MB if audio cuts out
+  cpus   = 1
