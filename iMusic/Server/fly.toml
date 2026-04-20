@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for imusic on 2026-04-20T12:35:41Z
+# fly.toml app configuration file generated for imusic on 2026-04-20T13:47:47Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -7,10 +7,6 @@ app = 'imusic'
 primary_region = 'ord'
 
 [build]
-  dockerfile = "Dockerfile"
-
-[env]
-  WORKERS = "1"
 
 [http_service]
   internal_port = 8080
@@ -24,3 +20,4 @@ primary_region = 'ord'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256
