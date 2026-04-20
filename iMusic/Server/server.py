@@ -93,6 +93,31 @@ def _fetch_info_with_retry(video_id, max_retries=3):
         if use_cookies and os.path.exists(COOKIES_FILE):
             base_opts["cookiefile"] = COOKIES_FILE
 
+        # First try without any format spec — get all formats yt-dlp can see,
+        # then manually pick the best audio. Avoids "Requested format is not available"
+        # when GetPOT unlocks metadata but the format list is unexpectedly shaped.
+        try:
+            with yt_dlp.YoutubeDL(base_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                formats = info.get("formats") or []
+                # Pick best audio-only m4a, then any audio, then any format
+                audio = (
+                    next((f for f in reversed(formats) if f.get("ext") == "m4a" and f.get("acodec") != "none" and f.get("vcodec") == "none"), None) or
+                    next((f for f in reversed(formats) if f.get("acodec") != "none" and f.get("vcodec") == "none"), None) or
+                    next((f for f in reversed(formats) if f.get("url")), None)
+                )
+                if audio:
+                    info["url"] = audio["url"]
+                    print(f"[yt-dlp/{clients[0]}] OK (no-fmt pick: {audio.get('ext','?')} {audio.get('abr','?')}kbps)", flush=True)
+                    return info
+                # formats list empty — fall through to format-spec attempts
+        except Exception as e:
+            last_err = e
+            err_str = str(e)
+            print(f"[yt-dlp/{clients[0]}] no-fmt: {err_str[:120]}", flush=True)
+            if "Sign in to confirm" in err_str or "Only images are available" in err_str:
+                continue  # skip remaining formats for this profile
+
         for fmt in _FORMAT_FALLBACKS:
             opts = {**base_opts, "format": fmt}
             try:
@@ -108,11 +133,8 @@ def _fetch_info_with_retry(video_id, max_retries=3):
                     break  # IP/auth blocked — no point trying other formats
                 if "Only images are available" in err_str:
                     break  # not a video — skip profile
-                # "Requested format is not available" → try next format in fallback list
-                # 429: brief wait then try next format
                 if "429" in err_str:
                     time.sleep(3)
-                # any other error: move on immediately
 
     raise last_err
 
