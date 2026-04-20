@@ -39,10 +39,7 @@ CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 # Browser cookies work with web-based clients only; ios/android API endpoints
 # reject browser cookies and fail with "no player response".
 _CLIENT_PROFILES = [
-    (["web"],         True),   # PO tokens help web client the most
-    (["mweb"],        True),
-    (["tv_embedded"], True),
-    (["android"],     False),
+    (["android"], False),  # returns pre-signed URLs, no DRM, works with GetPOT
 ]
 
 # Prefer direct HTTPS m4a streams (non-fragmented, non-DASH, non-HLS).
@@ -100,11 +97,12 @@ def _fetch_info_with_retry(video_id, max_retries=3):
             with yt_dlp.YoutubeDL(base_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 formats = info.get("formats") or []
-                # Pick best audio-only m4a, then any audio, then any format
+                # Pick best audio-only m4a (avoids iOS double-duration bug with DASH),
+                # then any audio-only, then combined as last resort (never video-only).
                 audio = (
                     next((f for f in reversed(formats) if f.get("ext") == "m4a" and f.get("acodec") != "none" and f.get("vcodec") == "none"), None) or
                     next((f for f in reversed(formats) if f.get("acodec") != "none" and f.get("vcodec") == "none"), None) or
-                    next((f for f in reversed(formats) if f.get("url")), None)
+                    next((f for f in reversed(formats) if f.get("acodec") != "none" and f.get("url")), None)
                 )
                 if audio:
                     info["url"] = audio["url"]
