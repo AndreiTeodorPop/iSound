@@ -39,7 +39,8 @@ CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 # Browser cookies work with web-based clients only; ios/android API endpoints
 # reject browser cookies and fail with "no player response".
 _CLIENT_PROFILES = [
-    (["android"], False),  # returns pre-signed URLs, no DRM, works with GetPOT
+    (["android"], True),   # pre-signed URLs + cookies to satisfy bot check
+    (["android"], False),  # fallback without cookies
 ]
 
 # Prefer direct HTTPS m4a streams (non-fragmented, non-DASH, non-HLS).
