@@ -4,10 +4,13 @@
 #
 
 app = 'imusic'
-primary_region = 'ams'
+primary_region = 'ord'
 
 [build]
   dockerfile = "Dockerfile"
+
+[env]
+  WORKERS = "1"
 
 [http_service]
   internal_port = 8080
