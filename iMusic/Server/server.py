@@ -202,6 +202,11 @@ def _get_info(video_id):
     return entry
 
 
+@app.route("/")
+def health():
+    return jsonify({"status": "ok"}), 200
+
+
 @app.route("/stream")
 def stream():
     video_id = request.args.get("id", "")
