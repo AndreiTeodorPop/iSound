@@ -1,6 +1,7 @@
 flask
 gunicorn
 yt-dlp
+yt-dlp-get-pot
 pytubefix
 bgutil-ytdlp-pot-provider
 requests

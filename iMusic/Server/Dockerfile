@@ -25,10 +25,9 @@ RUN pip install --no-cache-dir --quiet --root-user-action=ignore --upgrade pip &
 # Mount this as a volume: -v yt-dlp-cache:/app/yt-dlp-cache
 RUN mkdir -p /app/yt-dlp-cache
 
-# Optional: default port if Railway doesn't set it
 ENV PORT=8080
-# Optional: number of gunicorn workers (Railway auto-scales, so small number is fine)
-ENV WORKERS=3
+ENV WORKERS=1
 
-# Shell form ensures env variables are expanded
-CMD ["sh", "-c", "gunicorn server:app --bind 0.0.0.0:${PORT:-8080} --workers ${WORKERS:-1} --timeout 300"]
+RUN chmod +x /app/start.sh
+
+CMD ["/app/start.sh"]
