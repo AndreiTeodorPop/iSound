@@ -2,15 +2,16 @@
 # https://curl.haxx.se/rfc/cookie_spec.html
 # This is a generated file! Do not edit.
 
-.youtube.com	TRUE	/	TRUE	1809632227	__Secure-3PAPISID	pSQoc427xgCgaRsW/AfbcLwXmGKZLyDPq0
-.youtube.com	TRUE	/	TRUE	1809632227	__Secure-3PSID	g.a0008gjPB6xDYwEO3O5ivHvu-rjENagzIR5RuWq25lskcvM2YYqqqw3pehabDbmeWkgXCJ6D6gACgYKAVsSARISFQHGX2Miyo2zVm1xUp18khk9t4n9XxoVAUF8yKqjOhX8HxZxl1hhHBUtYErx0076
-.youtube.com	TRUE	/	TRUE	1809632227	LOGIN_INFO	AFmmF2swRAIgJxvEPMG3vb0ud1NwWOlHasMZoB90ufWcjs3EdXnB_KECIBAllOgdUwq6Vy1Enzh1zoeo9uH8YhSZA2a_V98yhusp:QUQ3MjNmeEF0UUJMZTBhazgxVW1Va0tsNjVtbkRleU00V256QVFNd0ktMnlWdFRXLVpUeWlhQkh2bTFreHgxa2FhZ285b3ZYcV9KcUpaSlpYSDYwZ3BmLUtlbno5VE5CRTY1azFWdGlDX3RsV1RHMkl1WUNqdjdWNkwyaE53Z2ZSUFRmUk1va1J1a1dfRmp0ZHJ5Y3JseklscGdULVFFX1lR
-.youtube.com	TRUE	/	TRUE	1810134382	PREF	tz=Europe.Bucharest&f4=4000000&f6=40000000&f7=100
-.youtube.com	TRUE	/	TRUE	1807110384	__Secure-1PSIDTS	sidts-CjQBWhotCYhgF22gjNDvRcOuLcmz_xffK4MT0Dju9x4E7h0NgEBRnRf0M1rtwWaWH4m5QHlfEAA
-.youtube.com	TRUE	/	TRUE	1807110384	__Secure-3PSIDTS	sidts-CjQBWhotCYhgF22gjNDvRcOuLcmz_xffK4MT0Dju9x4E7h0NgEBRnRf0M1rtwWaWH4m5QHlfEAA
-.youtube.com	TRUE	/	TRUE	1809200226	__Secure-YEC	Cgs5c25CMzNMWTU5SSjwutTOBjIoCgJSTxIiEh4SHAsMDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicgXg%3D%3D
-.youtube.com	TRUE	/	TRUE	1807110385	__Secure-3PSIDCC	AKEyXzWMv_P8TcT96iWXxNObsG70FPw-rA-OqsrgEpUEgoNJ1NsxmlRV541dnD1AE8A-Dw_jRQ
-.youtube.com	TRUE	/	FALSE	1775574390	ST-3opvp5	session_logininfo=AFmmF2swRAIgJxvEPMG3vb0ud1NwWOlHasMZoB90ufWcjs3EdXnB_KECIBAllOgdUwq6Vy1Enzh1zoeo9uH8YhSZA2a_V98yhusp%3AQUQ3MjNmeEF0UUJMZTBhazgxVW1Va0tsNjVtbkRleU00V256QVFNd0ktMnlWdFRXLVpUeWlhQkh2bTFreHgxa2FhZ285b3ZYcV9KcUpaSlpYSDYwZ3BmLUtlbno5VE5CRTY1azFWdGlDX3RsV1RHMkl1WUNqdjdWNkwyaE53Z2ZSUFRmUk1va1J1a1dfRmp0ZHJ5Y3JseklscGdULVFFX1lR
-.youtube.com	TRUE	/	TRUE	1809702385	VISITOR_PRIVACY_METADATA	CgJSTxIiEh4SHAsMDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicgXg%3D%3D
-.youtube.com	TRUE	/	TRUE	1791054408	__Secure-ROLLOUT_TOKEN	CM-SqJXliJftARDRk-Ks3KCTAxi3nufy9dmTAw%3D%3D
-.youtube.com	TRUE	/	TRUE	0	YSC	lLKDb-LmAkg
+.youtube.com    TRUE    /    TRUE    1809632227    __Secure-3PAPISID    pSQoc427xgCgaRsW/AfbcLwXmGKZLyDPq0
+.youtube.com    TRUE    /    TRUE    1809632227    __Secure-3PSID    g.a0008gjPB6xDYwEO3O5ivHvu-rjENagzIR5RuWq25lskcvM2YYqqqw3pehabDbmeWkgXCJ6D6gACgYKAVsSARISFQHGX2Miyo2zVm1xUp18khk9t4n9XxoVAUF8yKqjOhX8HxZxl1hhHBUtYErx0076
+.youtube.com    TRUE    /    TRUE    1809632227    LOGIN_INFO    AFmmF2swRAIgJxvEPMG3vb0ud1NwWOlHasMZoB90ufWcjs3EdXnB_KECIBAllOgdUwq6Vy1Enzh1zoeo9uH8YhSZA2a_V98yhusp:QUQ3MjNmeEF0UUJMZTBhazgxVW1Va0tsNjVtbkRleU00V256QVFNd0ktMnlWdFRXLVpUeWlhQkh2bTFreHgxa2FhZ285b3ZYcV9KcUpaSlpYSDYwZ3BmLUtlbno5VE5CRTY1azFWdGlDX3RsV1RHMkl1WUNqdjdWNkwyaE53Z2ZSUFRmUk1va1J1a1dfRmp0ZHJ5Y3JseklscGdULVFFX1lR
+.youtube.com    TRUE    /    TRUE    1791746333    __Secure-BUCKET    CIMG
+.youtube.com    TRUE    /    TRUE    1811249225    PREF    tz=Europe.Istanbul&f4=4000000&f6=40000000&f7=100
+.youtube.com    TRUE    /    FALSE    1776689231    ST-xuwub9    session_logininfo=AFmmF2swRAIgJxvEPMG3vb0ud1NwWOlHasMZoB90ufWcjs3EdXnB_KECIBAllOgdUwq6Vy1Enzh1zoeo9uH8YhSZA2a_V98yhusp%3AQUQ3MjNmeEF0UUJMZTBhazgxVW1Va0tsNjVtbkRleU00V256QVFNd0ktMnlWdFRXLVpUeWlhQkh2bTFreHgxa2FhZ285b3ZYcV9KcUpaSlpYSDYwZ3BmLUtlbno5VE5CRTY1azFWdGlDX3RsV1RHMkl1WUNqdjdWNkwyaE53Z2ZSUFRmUk1va1J1a1dfRmp0ZHJ5Y3JseklscGdULVFFX1lR
+.youtube.com    TRUE    /    TRUE    1808225227    __Secure-1PSIDTS    sidts-CjQBWhotCQTgLAhRdQAjqOw287CetxMgjROJIfvj6KynlQthd45uCox2vXPVw6IB1pwv4CsxEAA
+.youtube.com    TRUE    /    TRUE    1808225227    __Secure-3PSIDTS    sidts-CjQBWhotCQTgLAhRdQAjqOw287CetxMgjROJIfvj6KynlQthd45uCox2vXPVw6IB1pwv4CsxEAA
+.youtube.com    TRUE    /    TRUE    1808225228    __Secure-3PSIDCC    AKEyXzX5lActdHtZFquDCn__5pDMkzLgwpMnmAiwGsufYZy6Maw8J4irOZB_BnCG9xparN9Lqw
+.youtube.com    TRUE    /    TRUE    1792187482    __Secure-ROLLOUT_TOKEN    CM-SqJXliJftARDRk-Ks3KCTAxizvff28vqTAw%3D%3D
+.youtube.com    TRUE    /    TRUE    1792241223    VISITOR_INFO1_LIVE    idvzO6uJqaw
+.youtube.com    TRUE    /    TRUE    1792241223    VISITOR_PRIVACY_METADATA    CgJUUhIEGgAgFg%3D%3D
+.youtube.com    TRUE    /    TRUE    0    YSC    lDPl_tUSDoc

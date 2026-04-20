@@ -35,10 +35,13 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 
 
-# Only the android client works reliably on datacenter IPs (no cookies needed,
-# uses a different API path that bypasses bot detection).
+# Cookie-based clients first (bypass bot detection on datacenter IPs),
+# then android as a cookieless fallback.
 _CLIENT_PROFILES = [
-    (["android"], False),
+    (["mweb"],        True),
+    (["web"],         True),
+    (["tv_embedded"], True),
+    (["android"],     False),
 ]
 
 # Prefer direct HTTPS m4a streams (non-fragmented, non-DASH, non-HLS).
