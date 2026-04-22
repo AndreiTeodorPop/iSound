@@ -10,6 +10,18 @@ import requests as http_requests
 
 FFMPEG_LOCATION = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
 
+# Community cobalt instances — tried in order, no API key required.
+# Override with a comma-separated COBALT_API_URL env var to use specific instances.
+_COBALT_INSTANCES = (
+    os.environ.get("COBALT_API_URL", "").split(",")
+    if os.environ.get("COBALT_API_URL")
+    else [
+        "https://cobalt.api.wanderer.moe/",
+        "https://cobalt.imput.net/",
+        "https://co.wuk.sh/",
+    ]
+)
+
 app = Flask(__name__)
 
 _cache = {}
@@ -17,45 +29,46 @@ _cache_lock = threading.Lock()
 
 
 def _fetch_info_cobalt(video_id):
-    """cobalt.tools public API — runs on independent infrastructure not flagged by YouTube."""
-    try:
-        r = http_requests.post(
-            "https://api.cobalt.tools/",
-            json={
-                "url": f"https://www.youtube.com/watch?v={video_id}",
-                "downloadMode": "audio",
-            },
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "iMusic/1.0",
-            },
-            timeout=15,
-        )
-        if r.status_code != 200:
-            print(f"[cobalt] HTTP {r.status_code}", flush=True)
-            return None
-        data = r.json()
-        status = data.get("status")
-        if status in ("error", "rate-limit"):
-            print(f"[cobalt] {status}: {data.get('error', {}).get('code', '')}", flush=True)
-            return None
-        url = data.get("url")
-        if not url:
-            print(f"[cobalt] no url (status={status})", flush=True)
-            return None
-        print(f"[cobalt] OK → {status}", flush=True)
-        filename = data.get("filename", "")
-        title = re.sub(r'\.(opus|mp3|m4a|webm)$', '', filename)
-        return {
-            "url":      url,
-            "title":    title,
-            "artist":   "",
-            "duration": 0,
-            "expires":  time.time() + 1800,
-        }
-    except Exception as e:
-        print(f"[cobalt] {e}", flush=True)
+    """Tries community cobalt instances in order — no API key required."""
+    for instance in _COBALT_INSTANCES:
+        try:
+            r = http_requests.post(
+                instance,
+                json={
+                    "url": f"https://www.youtube.com/watch?v={video_id}",
+                    "downloadMode": "audio",
+                },
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "iMusic/1.0",
+                },
+                timeout=15,
+            )
+            if r.status_code != 200:
+                print(f"[cobalt] {instance} → HTTP {r.status_code}: {r.text[:200]}", flush=True)
+                continue
+            data = r.json()
+            status = data.get("status")
+            if status in ("error", "rate-limit"):
+                print(f"[cobalt] {instance} → {status}: {data.get('error', {}).get('code', '')}", flush=True)
+                continue
+            url = data.get("url")
+            if not url:
+                print(f"[cobalt] {instance} → no url (status={status})", flush=True)
+                continue
+            print(f"[cobalt] {instance} OK → {status}", flush=True)
+            filename = data.get("filename", "")
+            title = re.sub(r'\.(opus|mp3|m4a|webm)$', '', filename)
+            return {
+                "url":      url,
+                "title":    title,
+                "artist":   "",
+                "duration": 0,
+                "expires":  time.time() + 1800,
+            }
+        except Exception as e:
+            print(f"[cobalt] {instance} → {e}", flush=True)
     return None
 
 
