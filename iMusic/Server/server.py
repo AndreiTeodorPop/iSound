@@ -164,18 +164,23 @@ def _fetch_info_with_retry(video_id, max_retries=3):
 
 _PIPED_INSTANCES = [
     "https://pipedapi.kavin.rocks",
-    "https://piped-api.garudalinux.org",
-    "https://pipedapi.adminforge.de",
+    "https://pipedapi.tokhmi.xyz",
+    "https://api.piped.yt",
+    "https://piped-api.privacy.com.de",
     "https://pipedapi.syncpundit.io",
 ]
 
 _INVIDIOUS_INSTANCES = [
-    "https://invidious.io",
+    "https://yewtu.be",
+    "https://invidious.tiekoetter.com",
+    "https://iv.ggtyler.dev",
+    "https://yt.artemislena.eu",
+    "https://invidious.flokinet.to",
+    "https://invidious.privacydev.net",
+    "https://invidious.fdn.fr",
+    "https://inv.riverside.rocks",
     "https://y.com.sb",
-    "https://inv.nadeko.net",
-    "https://invidious.nerdvpn.de",
-    "https://invidious.perennialte.ch",
-    "https://vid.puffyan.us",
+    "https://invidious.lunar.icu",
 ]
 
 
@@ -217,7 +222,7 @@ def _fetch_info_invidious(video_id):
         try:
             r = http_requests.get(
                 f"{instance}/api/v1/videos/{video_id}",
-                params={"fields": "title,author,lengthSeconds,adaptiveFormats,formatStreams"},
+                params={"fields": "title,author,lengthSeconds,adaptiveFormats,formatStreams", "local": "true"},
                 timeout=8,
             )
             if r.status_code != 200:
