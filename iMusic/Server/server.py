@@ -39,11 +39,11 @@ CACHE_TTL = 3600  # YouTube URLs expire in ~6h; refresh after 1h to be safe
 # Browser cookies work with web-based clients only; ios/android API endpoints
 # reject browser cookies and fail with "no player response".
 _CLIENT_PROFILES = [
-    (["ios"],         False),  # pre-signed URLs, distinct API endpoint from android
-    (["android"],     False),  # pre-signed URLs, no DRM
-    (["mweb"],        True),   # cookie-based fallback
-    (["web"],         True),
+    (["mweb"],        True),
     (["tv_embedded"], True),
+    (["web"],         True),
+    (["ios"],         False),
+    (["android"],     False),
 ]
 
 # Prefer direct HTTPS m4a streams (non-fragmented, non-DASH, non-HLS).
@@ -52,9 +52,7 @@ _CLIENT_PROFILES = [
 # protocol=https selects progressive-download streams that proxy cleanly.
 _FORMAT_FALLBACKS = [
     "bestaudio[ext=m4a]/bestaudio/best",
-    "bestaudio",
     "best",
-    "worst",  # last resort — any stream at all
 ]
 
 
@@ -99,36 +97,20 @@ def _fetch_info_with_retry(video_id, max_retries=3):
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=False)
-                    # If yt-dlp didn't resolve a direct URL, pick from the formats list manually.
-                    # This handles cases where the info dict has formats but no top-level url.
-                    if not info.get("url"):
-                        formats = info.get("formats") or []
-                        audio = (
-                            next((f for f in reversed(formats)
-                                  if f.get("ext") == "m4a"
-                                  and f.get("acodec") != "none"
-                                  and f.get("vcodec") == "none"), None)
-                            or next((f for f in reversed(formats)
-                                     if f.get("acodec") != "none"
-                                     and f.get("vcodec") == "none"), None)
-                            or next((f for f in reversed(formats)
-                                     if f.get("acodec") != "none"
-                                     and f.get("url")), None)
-                        )
-                        if audio:
-                            info["url"] = audio["url"]
-                        else:
-                            continue
-                    print(f"[yt-dlp/{clients[0]}] OK (fmt={fmt})", flush=True)
+                    print(f"[yt-dlp/{clients[0]}] OK", flush=True)
                     return info
             except Exception as e:
                 last_err = e
                 err_str = str(e)
                 print(f"[yt-dlp/{clients[0]}] {err_str[:120]}", flush=True)
-                if "Sign in to confirm" in err_str or "Only images are available" in err_str:
-                    break  # skip remaining formats for this profile
+                if "Requested format is not available" in err_str or \
+                   "Only images are available" in err_str or \
+                   "Sign in to confirm" in err_str:
+                    break  # this profile won't work, try next profile
+                # 429: brief wait then try next format
                 if "429" in err_str:
                     time.sleep(3)
+                # any other error: move on immediately
 
     raise last_err
 
@@ -218,11 +200,6 @@ def _get_info(video_id):
     with _cache_lock:
         _cache[video_id] = entry
     return entry
-
-
-@app.route("/")
-def health():
-    return jsonify({"status": "ok"}), 200
 
 
 @app.route("/stream")
