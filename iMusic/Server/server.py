@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, Response, stream_with_context
+import yt_dlp
 import os
 import re
 import subprocess
@@ -10,65 +11,72 @@ import requests as http_requests
 
 FFMPEG_LOCATION = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
 
-# Community cobalt instances — tried in order, no API key required.
-# Override with a comma-separated COBALT_API_URL env var to use specific instances.
-_COBALT_INSTANCES = (
-    os.environ.get("COBALT_API_URL", "").split(",")
-    if os.environ.get("COBALT_API_URL")
-    else [
-        "https://cobalt.api.wanderer.moe/",
-        "https://cobalt.imput.net/",
-        "https://co.wuk.sh/",
-    ]
-)
+_SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+YTDLP_CACHE_DIR = os.environ.get("YTDLP_CACHE_DIR", os.path.join(_SERVER_DIR, "yt-dlp-cache"))
+os.makedirs(YTDLP_CACHE_DIR, exist_ok=True)
+
+# Optional cookies file — export from your browser while logged into YouTube.
+# Place cookies.txt next to server.py, or set COOKIES_FILE env var.
+COOKIES_FILE = os.environ.get("COOKIES_FILE", os.path.join(_SERVER_DIR, "cookies.txt"))
 
 app = Flask(__name__)
 
 _cache = {}
 _cache_lock = threading.Lock()
+CACHE_TTL = 3600
 
 
-def _fetch_info_cobalt(video_id):
-    """Tries community cobalt instances in order — no API key required."""
-    for instance in _COBALT_INSTANCES:
+class _QuietLogger:
+    def debug(self, msg): pass
+    def info(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg): print(f"[yt-dlp] {msg}", flush=True)
+
+
+_CLIENT_PROFILES = [
+    (["ios"],         ["webpage", "configs", "js"]),
+    (["android"],     ["webpage", "configs", "js"]),
+    (["tv_embedded"], ["webpage"]),
+    (["web"],         ["webpage"]),
+]
+
+def _fetch_info_ytdlp(video_id):
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    base_opts = {
+        "quiet": True,
+        "logger": _QuietLogger(),
+        "cachedir": YTDLP_CACHE_DIR,
+        "nocheckcertificate": True,
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
+    }
+    if os.path.exists(COOKIES_FILE):
+        base_opts["cookiefile"] = COOKIES_FILE
+    for clients, player_skip in _CLIENT_PROFILES:
+        opts = {
+            **base_opts,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": clients,
+                    "player_skip": player_skip,
+                }
+            },
+        }
         try:
-            r = http_requests.post(
-                instance,
-                json={
-                    "url": f"https://www.youtube.com/watch?v={video_id}",
-                    "downloadMode": "audio",
-                },
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "User-Agent": "iMusic/1.0",
-                },
-                timeout=15,
-            )
-            if r.status_code != 200:
-                print(f"[cobalt] {instance} → HTTP {r.status_code}: {r.text[:200]}", flush=True)
-                continue
-            data = r.json()
-            status = data.get("status")
-            if status in ("error", "rate-limit"):
-                print(f"[cobalt] {instance} → {status}: {data.get('error', {}).get('code', '')}", flush=True)
-                continue
-            url = data.get("url")
-            if not url:
-                print(f"[cobalt] {instance} → no url (status={status})", flush=True)
-                continue
-            print(f"[cobalt] {instance} OK → {status}", flush=True)
-            filename = data.get("filename", "")
-            title = re.sub(r'\.(opus|mp3|m4a|webm)$', '', filename)
-            return {
-                "url":      url,
-                "title":    title,
-                "artist":   "",
-                "duration": 0,
-                "expires":  time.time() + 1800,
-            }
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                print(f"[yt-dlp/{clients[0]}] OK: {info.get('title', '')[:60]}", flush=True)
+                return {
+                    "url":      info["url"],
+                    "title":    info.get("title", ""),
+                    "artist":   info.get("uploader", ""),
+                    "duration": info.get("duration", 0),
+                    "expires":  time.time() + CACHE_TTL,
+                }
         except Exception as e:
-            print(f"[cobalt] {instance} → {e}", flush=True)
+            err = str(e)
+            print(f"[yt-dlp/{clients[0]}] {err[:120]}", flush=True)
+            if "Sign in to confirm" in err:
+                break
     return None
 
 
@@ -79,11 +87,11 @@ def _get_info(video_id):
         if entry and entry["expires"] > now:
             return entry
 
-    entry = _fetch_info_cobalt(video_id)
+    entry = _fetch_info_ytdlp(video_id)
 
     if not entry:
-        print(f"[iMusic] cobalt failed for {video_id}", flush=True)
-        raise Exception("Could not fetch stream from YouTube")
+        print(f"[iMusic] failed for {video_id}", flush=True)
+        raise Exception("Could not fetch stream. Authenticate via: fly ssh console → yt-dlp --cache-dir /app/yt-dlp-cache --username oauth2 --password '' <url>")
 
     with _cache_lock:
         _cache[video_id] = entry
@@ -123,7 +131,13 @@ def proxy():
         url = entry["url"]
         print(f"[proxy] {video_id} → {url[:80]}...", flush=True)
 
-        headers = {"Accept": "*/*", "Accept-Encoding": "identity"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Referer": "https://www.youtube.com/",
+            "Origin": "https://www.youtube.com",
+            "Accept": "*/*",
+            "Accept-Encoding": "identity",
+        }
         range_header = request.headers.get("Range")
         if range_header:
             headers["Range"] = range_header
@@ -161,7 +175,7 @@ def download():
     if not video_id:
         return jsonify({"error": "missing id"}), 400
 
-    info = _fetch_info_cobalt(video_id)
+    info = _fetch_info_ytdlp(video_id)
     if not info:
         return jsonify({"error": "Could not fetch audio URL"}), 500
 
@@ -171,6 +185,7 @@ def download():
 
     ffmpeg_cmd = [
         FFMPEG_LOCATION or "ffmpeg",
+        "-headers", "User-Agent: Mozilla/5.0 (compatible)\r\nAccept: */*\r\n",
         "-i", source_url,
         "-vn",
         "-f", "mp3",

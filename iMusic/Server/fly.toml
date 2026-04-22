@@ -11,6 +11,8 @@ primary_region = 'ord'
 
 [env]
   WORKERS = "1"
+  COOKIES_FILE = "/app/yt-dlp-cache/cookies.txt"
+  YTDLP_CACHE_DIR = "/app/yt-dlp-cache"
 
 [http_service]
   internal_port = 8080
@@ -24,3 +26,7 @@ primary_region = 'ord'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
+
+[mounts]
+  source = "ytdlp_cache"
+  destination = "/app/yt-dlp-cache"
