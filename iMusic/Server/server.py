@@ -8,6 +8,7 @@ import shutil
 import time
 import threading
 import urllib.parse
+import json
 import requests as http_requests
 
 FFMPEG_LOCATION = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
@@ -26,6 +27,64 @@ COOKIES_FILE = os.path.join(_SERVER_DIR, "cookies.txt") if os.path.exists(
 # Mount /app/yt-dlp-cache as a Docker volume to survive container restarts.
 YTDLP_CACHE_DIR = os.environ.get("YTDLP_CACHE_DIR", "/app/yt-dlp-cache")
 os.makedirs(YTDLP_CACHE_DIR, exist_ok=True)
+
+# PO token override — set via Fly.io secret if you want to pin a manually-obtained token.
+# If not set, the server generates one automatically using youtube-po-token-generator.
+YT_PO_TOKEN = os.environ.get("YT_PO_TOKEN", "").strip()
+
+_POT_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generate_pot.js")
+_pot_cache: dict = {"token": None, "expires": 0}
+_pot_lock = threading.Lock()
+_POT_TTL = 21600  # 6 hours; tokens are valid for ~1 day but refresh early to be safe
+
+
+def _generate_po_token() -> str | None:
+    """Run generate_pot.js via Node and return a yt-dlp po_token string."""
+    try:
+        result = subprocess.run(
+            ["node", _POT_SCRIPT],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            print(f"[pot] node script error: {result.stderr.strip()[:200]}", flush=True)
+            return None
+        data = json.loads(result.stdout.strip())
+        visitor_data = data.get("visitorData", "")
+        po_token = data.get("poToken", "")
+        if visitor_data and po_token:
+            return f"web+{visitor_data}+{po_token}"
+        print(f"[pot] unexpected output: {result.stdout[:100]}", flush=True)
+    except Exception as e:
+        print(f"[pot] generation failed: {e}", flush=True)
+    return None
+
+
+def _get_po_token() -> str | None:
+    """Return a valid PO token, generating/refreshing as needed."""
+    if YT_PO_TOKEN:
+        return YT_PO_TOKEN  # manual override takes priority
+    now = time.time()
+    with _pot_lock:
+        if _pot_cache["token"] and _pot_cache["expires"] > now:
+            return _pot_cache["token"]
+    token = _generate_po_token()
+    if token:
+        with _pot_lock:
+            _pot_cache["token"] = token
+            _pot_cache["expires"] = now + _POT_TTL
+        print(f"[pot] new token generated, valid for {_POT_TTL // 3600}h", flush=True)
+    return token
+
+# Startup diagnostics — visible in Fly.io / Docker logs
+_cookie_exists = os.path.exists(COOKIES_FILE)
+_cookie_size   = os.path.getsize(COOKIES_FILE) if _cookie_exists else 0
+print(f"[startup] cookies: {COOKIES_FILE} exists={_cookie_exists} size={_cookie_size}b", flush=True)
+if _cookie_exists and _cookie_size < 200:
+    print("[startup] WARNING: cookies.txt is very small — may be empty or malformed", flush=True)
+print(f"[startup] po_token override: {'yes (' + str(len(YT_PO_TOKEN)) + ' chars)' if YT_PO_TOKEN else 'no — will auto-generate'}", flush=True)
+
+# Pre-warm the PO token in the background so the first request doesn't wait ~5s.
+threading.Thread(target=_get_po_token, daemon=True).start()
 
 app = Flask(__name__)
 
@@ -77,20 +136,26 @@ def _fetch_info_with_retry(video_id, max_retries=3):
         else:
             player_skip = ["webpage"]
 
+        po_token = _get_po_token()
+        yt_args = {
+            "player_client": clients,
+            "player_skip": player_skip,
+        }
+        if po_token:
+            yt_args["po_token"] = [po_token]
+
         base_opts = {
             "quiet": True,
             "logger": _QuietLogger(),
             "cachedir": YTDLP_CACHE_DIR,
             "nocheckcertificate": True,
-            "extractor_args": {
-                "youtube": {
-                    "player_client": clients,
-                    "player_skip": player_skip,
-                }
-            },
+            "extractor_args": {"youtube": yt_args},
         }
         if use_cookies and os.path.exists(COOKIES_FILE):
             base_opts["cookiefile"] = COOKIES_FILE
+            print(f"[yt-dlp/{clients[0]}] using cookies={_cookie_size}b po_token={'yes' if po_token else 'no'}", flush=True)
+        elif use_cookies:
+            print(f"[yt-dlp/{clients[0]}] WARNING: cookies requested but file not found: {COOKIES_FILE}", flush=True)
 
         for fmt in _FORMAT_FALLBACKS:
             opts = {**base_opts, "format": fmt}
