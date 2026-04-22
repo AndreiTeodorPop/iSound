@@ -323,7 +323,9 @@ def proxy():
         print(f"[proxy] {video_id} → {yt_url[:80]}...", flush=True)
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Referer": "https://www.youtube.com/",
+            "Origin": "https://www.youtube.com",
             "Accept": "*/*",
             "Accept-Encoding": "identity",  # avoid compressed responses
         }
@@ -411,7 +413,7 @@ def download():
     return Response(
         stream_with_context(generate()),
         mimetype="audio/mpeg",
-        headers={"Content-Disposition": f'attachment; filename="{safe_title}.mp3"'},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(f'{safe_title}.mp3', safe='')}"},
     )
 
 
