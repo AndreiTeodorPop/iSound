@@ -60,20 +60,13 @@ def _generate_po_token() -> str | None:
 
 
 def _get_po_token() -> str | None:
-    """Return a valid PO token, generating/refreshing as needed."""
+    """Return a cached/manual PO token. Never blocks — generation happens only in background."""
     if YT_PO_TOKEN:
-        return YT_PO_TOKEN  # manual override takes priority
-    now = time.time()
+        return YT_PO_TOKEN
     with _pot_lock:
-        if _pot_cache["token"] and _pot_cache["expires"] > now:
+        if _pot_cache["token"] and _pot_cache["expires"] > time.time():
             return _pot_cache["token"]
-    token = _generate_po_token()
-    if token:
-        with _pot_lock:
-            _pot_cache["token"] = token
-            _pot_cache["expires"] = now + _POT_TTL
-        print(f"[pot] new token generated, valid for {_POT_TTL // 3600}h", flush=True)
-    return token
+    return None
 
 # Startup diagnostics — visible in Fly.io / Docker logs
 _cookie_exists = os.path.exists(COOKIES_FILE)
@@ -128,21 +121,13 @@ class _QuietLogger:
 def _fetch_info_with_retry(video_id, max_retries=3):
     url = f"https://www.youtube.com/watch?v={video_id}"
     last_err = None
+    po_token = _get_po_token()  # non-blocking; None if not available
 
     for clients, use_cookies in _CLIENT_PROFILES:
-        # ios/android return pre-signed URLs — no JS needed.
-        # All other clients need JS to decrypt the n-challenge / signature.
         no_js_clients = {"ios", "android"}
-        if any(c in no_js_clients for c in clients):
-            player_skip = ["webpage", "configs", "js"]
-        else:
-            player_skip = ["webpage"]
+        player_skip = ["webpage", "configs", "js"] if any(c in no_js_clients for c in clients) else ["webpage"]
 
-        po_token = _get_po_token()
-        yt_args = {
-            "player_client": clients,
-            "player_skip": player_skip,
-        }
+        yt_args = {"player_client": clients, "player_skip": player_skip}
         if po_token:
             yt_args["po_token"] = [po_token]
 
@@ -155,14 +140,10 @@ def _fetch_info_with_retry(video_id, max_retries=3):
         }
         if use_cookies and os.path.exists(COOKIES_FILE):
             base_opts["cookiefile"] = COOKIES_FILE
-            print(f"[yt-dlp/{clients[0]}] using cookies={_cookie_size}b po_token={'yes' if po_token else 'no'}", flush=True)
-        elif use_cookies:
-            print(f"[yt-dlp/{clients[0]}] WARNING: cookies requested but file not found: {COOKIES_FILE}", flush=True)
 
         for fmt in _FORMAT_FALLBACKS:
-            opts = {**base_opts, "format": fmt}
             try:
-                with yt_dlp.YoutubeDL(opts) as ydl:
+                with yt_dlp.YoutubeDL({**base_opts, "format": fmt}) as ydl:
                     info = ydl.extract_info(url, download=False)
                     print(f"[yt-dlp/{clients[0]}] OK", flush=True)
                     return info
@@ -170,14 +151,12 @@ def _fetch_info_with_retry(video_id, max_retries=3):
                 last_err = e
                 err_str = str(e)
                 print(f"[yt-dlp/{clients[0]}] {err_str[:120]}", flush=True)
-                if "Requested format is not available" in err_str or \
-                   "Only images are available" in err_str or \
-                   "Sign in to confirm" in err_str:
-                    break  # this profile won't work, try next profile
-                # 429: brief wait then try next format
+                if "Sign in to confirm" in err_str:
+                    raise  # IP-level block — all other profiles will also fail, give up now
+                if "Requested format is not available" in err_str or "Only images are available" in err_str:
+                    break  # try next profile
                 if "429" in err_str:
-                    time.sleep(3)
-                # any other error: move on immediately
+                    time.sleep(2)
 
     raise last_err
 
@@ -233,30 +212,68 @@ def _fetch_info_pytubefix(video_id):
     return None
 
 
-# Public Invidious instances used as a last-resort fallback.
-# These run their own YouTube extraction on better-reputation IPs.
+_PIPED_INSTANCES = [
+    "https://pipedapi.kavin.rocks",
+    "https://piped-api.garudalinux.org",
+    "https://pipedapi.adminforge.de",
+    "https://pipedapi.syncpundit.io",
+]
+
 _INVIDIOUS_INSTANCES = [
-    "https://inv.tux.pizza",
-    "https://invidious.privacydev.net",
-    "https://yt.cdaut.de",
-    "https://invidious.slipfox.xyz",
-    "https://iv.datura.network",
+    "https://invidious.io",
+    "https://y.com.sb",
+    "https://inv.nadeko.net",
+    "https://invidious.nerdvpn.de",
+    "https://invidious.perennialte.ch",
+    "https://vid.puffyan.us",
 ]
 
 
+def _fetch_info_piped(video_id):
+    """Piped API — alternative YouTube frontend, usually reachable from cloud IPs."""
+    for instance in _PIPED_INSTANCES:
+        try:
+            r = http_requests.get(f"{instance}/streams/{video_id}", timeout=8)
+            if r.status_code != 200:
+                print(f"[piped] {instance} → HTTP {r.status_code}", flush=True)
+                continue
+            data = r.json()
+            if "error" in data:
+                print(f"[piped] {instance} → {data['error']}", flush=True)
+                continue
+            streams = data.get("audioStreams", [])
+            audio = (
+                next((s for s in streams if "mp4" in s.get("mimeType", "")), None)
+                or (streams[0] if streams else None)
+            )
+            if not audio:
+                continue
+            print(f"[piped] {instance} OK", flush=True)
+            return {
+                "url":      audio["url"],
+                "title":    data.get("title", ""),
+                "artist":   data.get("uploader", ""),
+                "duration": int(data.get("duration", 0)),
+                "expires":  time.time() + CACHE_TTL,
+            }
+        except Exception as e:
+            print(f"[piped] {instance} → {e}", flush=True)
+    return None
+
+
 def _fetch_info_invidious(video_id):
+    """Invidious API — another YouTube frontend, tried after Piped."""
     for instance in _INVIDIOUS_INSTANCES:
         try:
             r = http_requests.get(
                 f"{instance}/api/v1/videos/{video_id}",
                 params={"fields": "title,author,lengthSeconds,adaptiveFormats,formatStreams"},
-                timeout=10,
+                timeout=8,
             )
             if r.status_code != 200:
                 print(f"[invidious] {instance} → HTTP {r.status_code}", flush=True)
                 continue
             data = r.json()
-            # Prefer adaptive (audio-only) m4a; fall back to combined stream.
             audio = (
                 next((f for f in data.get("adaptiveFormats", [])
                       if f.get("type", "").startswith("audio/mp4")), None)
@@ -265,7 +282,7 @@ def _fetch_info_invidious(video_id):
                 or next((f for f in data.get("formatStreams", []) if f.get("url")), None)
             )
             if not audio:
-                print(f"[invidious] {instance} → no audio format found", flush=True)
+                print(f"[invidious] {instance} → no audio format", flush=True)
                 continue
             print(f"[invidious] {instance} OK", flush=True)
             return {
@@ -306,7 +323,11 @@ def _get_info(video_id):
     if not entry:
         entry = _fetch_info_pytubefix(video_id)
 
-    # 3. Invidious — runs extraction on its own servers, bypasses our IP reputation
+    # 3. Piped API — separate YouTube frontend infrastructure
+    if not entry:
+        entry = _fetch_info_piped(video_id)
+
+    # 4. Invidious — another frontend, tried last
     if not entry:
         entry = _fetch_info_invidious(video_id)
 
@@ -399,7 +420,7 @@ def download():
     if not video_id:
         return jsonify({"error": "missing id"}), 400
 
-    info = _fetch_info_pytubefix(video_id) or _fetch_info_invidious(video_id)
+    info = _fetch_info_pytubefix(video_id) or _fetch_info_piped(video_id) or _fetch_info_invidious(video_id)
     if not info:
         return jsonify({"error": "Could not fetch audio URL"}), 500
 
