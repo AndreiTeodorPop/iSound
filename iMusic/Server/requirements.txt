@@ -1,6 +1,5 @@
 flask
 gunicorn
-yt-dlp
 requests
 langdetect
 deep-translator
