@@ -29,8 +29,8 @@ YTDLP_CACHE_DIR = os.environ.get("YTDLP_CACHE_DIR", "/app/yt-dlp-cache")
 os.makedirs(YTDLP_CACHE_DIR, exist_ok=True)
 
 # PO token override — set via Fly.io secret if you want to pin a manually-obtained token.
-# If not set, the server generates one automatically using youtube-po-token-generator.
 YT_PO_TOKEN = os.environ.get("YT_PO_TOKEN", "").strip()
+
 
 _POT_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generate_pot.js")
 _pot_cache: dict = {"token": None, "expires": 0}
@@ -161,56 +161,6 @@ def _fetch_info_with_retry(video_id, max_retries=3):
     raise last_err
 
 
-def _fetch_info_pytubefix(video_id):
-    """Fallback extractor using pytubefix with multiple clients.
-    Different clients use different API endpoints with different bot-detection
-    thresholds — we try them in order until one works."""
-    from pytubefix import YouTube
-
-    url = f"https://www.youtube.com/watch?v={video_id}"
-
-    # Client order tuned for cloud IPs (Railway / Render / Fly):
-    # MWEB        — mobile web, lowest bot-detection threshold on datacenter IPs.
-    # ANDROID     — base Android client, different UA + API path from ANDROID_VR.
-    # WEB_CREATOR — YouTube Studio client, rarely rate-limited.
-    # ANDROID_VR / ANDROID_MUSIC / WEB_EMBED / WEB — last resorts.
-    # Removed: TV_EMBED (blocked: "no longer supported"), IOS (HTTP 400),
-    #          ANDROID_EMBED (not a valid pytubefix client name → KeyError).
-    _PYTUBEFIX_CLIENTS = [
-        "MWEB",
-        "ANDROID",
-        "WEB_CREATOR",
-        "ANDROID_VR",
-        "ANDROID_MUSIC",
-        "WEB_EMBED",
-        "WEB",
-    ]
-
-    for client in _PYTUBEFIX_CLIENTS:
-        try:
-            yt = YouTube(url, client=client)
-            # Prefer AAC/m4a — natively supported by iOS AVPlayer.
-            stream = yt.streams.filter(only_audio=True, mime_type="audio/mp4").order_by("abr").last()
-            if not stream:
-                stream = yt.streams.filter(only_audio=True).order_by("abr").last()
-            if not stream:
-                stream = yt.streams.first()
-            if not stream:
-                continue
-            print(f"[pytubefix/{client}] OK", flush=True)
-            return {
-                "url":      stream.url,
-                "title":    yt.title or "",
-                "artist":   yt.author or "",
-                "duration": yt.length or 0,
-                "expires":  time.time() + CACHE_TTL,
-            }
-        except Exception as e:
-            print(f"[pytubefix/{client}] {e}", flush=True)
-            continue
-
-    return None
-
 
 _PIPED_INSTANCES = [
     "https://pipedapi.kavin.rocks",
@@ -306,30 +256,26 @@ def _get_info(video_id):
 
     entry = None
 
-    # 1. yt-dlp (best quality; often blocked on datacenter IPs without a valid PO token)
-    try:
-        info = _fetch_info_with_retry(video_id)
-        entry = {
-            "url":      info["url"],
-            "title":    info.get("title", ""),
-            "artist":   info.get("uploader", ""),
-            "duration": info.get("duration", 0),
-            "expires":  now + CACHE_TTL,
-        }
-    except Exception:
-        pass
+    # 1. Piped — fast, independent infrastructure, no IP reputation issues
+    entry = _fetch_info_piped(video_id)
 
-    # 2. pytubefix — independent extractor, different HTTP fingerprint
-    if not entry:
-        entry = _fetch_info_pytubefix(video_id)
-
-    # 3. Piped API — separate YouTube frontend infrastructure
-    if not entry:
-        entry = _fetch_info_piped(video_id)
-
-    # 4. Invidious — another frontend, tried last
+    # 2. Invidious — another frontend with its own extraction
     if not entry:
         entry = _fetch_info_invidious(video_id)
+
+    # 3. yt-dlp — last resort; only likely to work with a valid OAuth2 token
+    if not entry:
+        try:
+            info = _fetch_info_with_retry(video_id)
+            entry = {
+                "url":      info["url"],
+                "title":    info.get("title", ""),
+                "artist":   info.get("uploader", ""),
+                "duration": info.get("duration", 0),
+                "expires":  now + CACHE_TTL,
+            }
+        except Exception:
+            pass
 
     if not entry:
         print(f"[iMusic] All sources failed for video {video_id}", flush=True)
@@ -420,7 +366,7 @@ def download():
     if not video_id:
         return jsonify({"error": "missing id"}), 400
 
-    info = _fetch_info_pytubefix(video_id) or _fetch_info_piped(video_id) or _fetch_info_invidious(video_id)
+    info = _fetch_info_piped(video_id) or _fetch_info_invidious(video_id)
     if not info:
         return jsonify({"error": "Could not fetch audio URL"}), 500
 
