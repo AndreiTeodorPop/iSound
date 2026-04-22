@@ -83,8 +83,10 @@ if _cookie_exists and _cookie_size < 200:
     print("[startup] WARNING: cookies.txt is very small — may be empty or malformed", flush=True)
 print(f"[startup] po_token override: {'yes (' + str(len(YT_PO_TOKEN)) + ' chars)' if YT_PO_TOKEN else 'no — will auto-generate'}", flush=True)
 
-# Pre-warm the PO token in the background so the first request doesn't wait ~5s.
-threading.Thread(target=_get_po_token, daemon=True).start()
+# Pre-warm the PO token in the background (only if a manual override is set —
+# auto-generation hangs on Fly.io because BotGuard is unreachable from datacenter IPs).
+if YT_PO_TOKEN:
+    threading.Thread(target=_get_po_token, daemon=True).start()
 
 app = Flask(__name__)
 
@@ -231,6 +233,53 @@ def _fetch_info_pytubefix(video_id):
     return None
 
 
+# Public Invidious instances used as a last-resort fallback.
+# These run their own YouTube extraction on better-reputation IPs.
+_INVIDIOUS_INSTANCES = [
+    "https://inv.tux.pizza",
+    "https://invidious.privacydev.net",
+    "https://yt.cdaut.de",
+    "https://invidious.slipfox.xyz",
+    "https://iv.datura.network",
+]
+
+
+def _fetch_info_invidious(video_id):
+    for instance in _INVIDIOUS_INSTANCES:
+        try:
+            r = http_requests.get(
+                f"{instance}/api/v1/videos/{video_id}",
+                params={"fields": "title,author,lengthSeconds,adaptiveFormats,formatStreams"},
+                timeout=10,
+            )
+            if r.status_code != 200:
+                print(f"[invidious] {instance} → HTTP {r.status_code}", flush=True)
+                continue
+            data = r.json()
+            # Prefer adaptive (audio-only) m4a; fall back to combined stream.
+            audio = (
+                next((f for f in data.get("adaptiveFormats", [])
+                      if f.get("type", "").startswith("audio/mp4")), None)
+                or next((f for f in data.get("adaptiveFormats", [])
+                         if "audio" in f.get("type", "")), None)
+                or next((f for f in data.get("formatStreams", []) if f.get("url")), None)
+            )
+            if not audio:
+                print(f"[invidious] {instance} → no audio format found", flush=True)
+                continue
+            print(f"[invidious] {instance} OK", flush=True)
+            return {
+                "url":      audio["url"],
+                "title":    data.get("title", ""),
+                "artist":   data.get("author", ""),
+                "duration": int(data.get("lengthSeconds", 0)),
+                "expires":  time.time() + CACHE_TTL,
+            }
+        except Exception as e:
+            print(f"[invidious] {instance} → {e}", flush=True)
+    return None
+
+
 def _get_info(video_id):
     now = time.time()
     with _cache_lock:
@@ -240,7 +289,7 @@ def _get_info(video_id):
 
     entry = None
 
-    # Try yt-dlp first (best quality when the server IP is not rate-limited)
+    # 1. yt-dlp (best quality; often blocked on datacenter IPs without a valid PO token)
     try:
         info = _fetch_info_with_retry(video_id)
         entry = {
@@ -253,19 +302,25 @@ def _get_info(video_id):
     except Exception:
         pass
 
-    # Fall back to pytubefix — independent Python extractor, different HTTP
-    # patterns than yt-dlp, often succeeds when yt-dlp is rate-limited.
+    # 2. pytubefix — independent extractor, different HTTP fingerprint
     if not entry:
         entry = _fetch_info_pytubefix(video_id)
 
+    # 3. Invidious — runs extraction on its own servers, bypasses our IP reputation
+    if not entry:
+        entry = _fetch_info_invidious(video_id)
+
     if not entry:
         print(f"[iMusic] All sources failed for video {video_id}", flush=True)
-        raise Exception("Could not fetch stream from YouTube or Invidious")
+        raise Exception("Could not fetch stream from YouTube")
 
     with _cache_lock:
         _cache[video_id] = entry
     return entry
 
+@app.route("/")
+def health():
+    return jsonify({"status": "ok"}), 200
 
 @app.route("/stream")
 def stream():
@@ -344,9 +399,7 @@ def download():
     if not video_id:
         return jsonify({"error": "missing id"}), 400
 
-    # yt-dlp always fails with bot detection on this server IP.
-    # Go straight to pytubefix to get the direct CDN audio URL.
-    info = _fetch_info_pytubefix(video_id)
+    info = _fetch_info_pytubefix(video_id) or _fetch_info_invidious(video_id)
     if not info:
         return jsonify({"error": "Could not fetch audio URL"}), 500
 
