@@ -2,7 +2,7 @@ import Foundation
 
 struct StreamService {
 
-    static let baseURL = "https://imusic.fly.dev"
+    static let baseURL = "https://imusic-andrei.duckdns.org"
 
     private static let session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -27,8 +27,12 @@ struct StreamService {
 
     // MARK: - Get Stream URL
 
-    static func getStreamURL(for videoId: String) async throws -> StreamResponse {
-        guard let url = URL(string: "\(baseURL)/stream?id=\(videoId)") else {
+    static func getStreamURL(for videoId: String, nextVideoId: String? = nil) async throws -> StreamResponse {
+        var urlStr = "\(baseURL)/stream?id=\(videoId)"
+        if let next = nextVideoId {
+            urlStr += "&next=\(next)"
+        }
+        guard let url = URL(string: urlStr) else {
             throw StreamError.invalidURL
         }
         let (data, response) = try await session.data(from: url)

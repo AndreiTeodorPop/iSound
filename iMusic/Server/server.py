@@ -8,8 +8,21 @@ import time
 import threading
 import urllib.parse
 import requests as http_requests
+import http.cookiejar
 
 FFMPEG_LOCATION = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
+
+# Make requests prefer IPv6 so proxy fetches use the same IP as yt-dlp extraction.
+# yt-dlp defaults to IPv6 on dual-stack servers; the CDN embeds the extracting IP
+# in the URL signature, so both must use the same address family.
+import socket as _socket
+_orig_getaddrinfo = _socket.getaddrinfo
+def _prefer_ipv6(host, port, family=0, type=0, proto=0, flags=0):
+    results = _orig_getaddrinfo(host, port, family, type, proto, flags)
+    ipv6 = [r for r in results if r[0] == _socket.AF_INET6]
+    ipv4 = [r for r in results if r[0] != _socket.AF_INET6]
+    return ipv6 + ipv4
+_socket.getaddrinfo = _prefer_ipv6
 
 _SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 YTDLP_CACHE_DIR = os.environ.get("YTDLP_CACHE_DIR", os.path.join(_SERVER_DIR, "yt-dlp-cache"))
@@ -26,32 +39,34 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 3600
 
 
+
+
 class _QuietLogger:
     def debug(self, msg): pass
     def info(self, msg): pass
     def warning(self, msg): pass
-    def error(self, msg): print(f"[yt-dlp] {msg}", flush=True)
+    def error(self, msg): pass
 
 
 _CLIENT_PROFILES = [
-    (["ios"],         ["webpage", "configs", "js"]),
-    (["android"],     ["webpage", "configs", "js"]),
-    (["tv_embedded"], ["webpage"]),
-    (["web"],         ["webpage"]),
+      (["ios"],         ["webpage", "configs", "js"], False),
+      (["android"],     ["webpage", "configs", "js"], False),
+      (["mweb"],        ["webpage"],                True),
+      (["tv_embedded"], ["webpage"],                True),
+      (["web"],         ["webpage"],                True),
 ]
 
 def _fetch_info_ytdlp(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
+    has_cookies = os.path.exists(COOKIES_FILE)
     base_opts = {
         "quiet": True,
         "logger": _QuietLogger(),
         "cachedir": YTDLP_CACHE_DIR,
         "nocheckcertificate": True,
-        "format": "bestaudio[ext=m4a]/bestaudio/best",
+        "format": "bestaudio[ext=m4a][vcodec=none]/bestaudio[vcodec=none]/140/251/250/249",
     }
-    if os.path.exists(COOKIES_FILE):
-        base_opts["cookiefile"] = COOKIES_FILE
-    for clients, player_skip in _CLIENT_PROFILES:
+    for clients, player_skip, use_cookies in _CLIENT_PROFILES:
         opts = {
             **base_opts,
             "extractor_args": {
@@ -61,22 +76,23 @@ def _fetch_info_ytdlp(video_id):
                 }
             },
         }
+        if use_cookies and has_cookies:
+            opts["cookiefile"] = COOKIES_FILE
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 print(f"[yt-dlp/{clients[0]}] OK: {info.get('title', '')[:60]}", flush=True)
                 return {
-                    "url":      info["url"],
-                    "title":    info.get("title", ""),
-                    "artist":   info.get("uploader", ""),
-                    "duration": info.get("duration", 0),
-                    "expires":  time.time() + CACHE_TTL,
+                    "url":          info["url"],
+                    "title":        info.get("title", ""),
+                    "artist":       info.get("uploader", ""),
+                    "duration":     info.get("duration", 0),
+                    "expires":      time.time() + CACHE_TTL,
+                    "http_headers": dict(info.get("http_headers", {})),
+                    "filesize":     info.get("filesize") or info.get("filesize_approx"),
                 }
-        except Exception as e:
-            err = str(e)
-            print(f"[yt-dlp/{clients[0]}] {err[:120]}", flush=True)
-            if "Sign in to confirm" in err:
-                break
+        except Exception:
+            continue
     return None
 
 
@@ -91,7 +107,7 @@ def _get_info(video_id):
 
     if not entry:
         print(f"[iMusic] failed for {video_id}", flush=True)
-        raise Exception("Could not fetch stream. Authenticate via: fly ssh console → yt-dlp --cache-dir /app/yt-dlp-cache --username oauth2 --password '' <url>")
+        raise Exception("Could not fetch stream. Upload cookies.txt to /root/cookies.txt on the server.")
 
     with _cache_lock:
         _cache[video_id] = entry
@@ -103,11 +119,28 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 
+def _prefetch(video_id):
+    now = time.time()
+    with _cache_lock:
+        entry = _cache.get(video_id)
+        if entry and entry["expires"] > now:
+            return
+    result = _fetch_info_ytdlp(video_id)
+    if result:
+        with _cache_lock:
+            _cache[video_id] = result
+        print(f"[prefetch] {video_id} cached", flush=True)
+
+
 @app.route("/stream")
 def stream():
     video_id = request.args.get("id", "")
     if not video_id:
         return jsonify({"error": "missing id"}), 400
+    # Prefetch next song in background if provided
+    next_id = request.args.get("next", "")
+    if next_id:
+        threading.Thread(target=_prefetch, args=(next_id,), daemon=True).start()
     try:
         entry = _get_info(video_id)
         proxy_url = request.host_url.rstrip("/") + f"/proxy?id={video_id}"
@@ -129,42 +162,78 @@ def proxy():
     try:
         entry = _get_info(video_id)
         url = entry["url"]
-        print(f"[proxy] {video_id} → {url[:80]}...", flush=True)
+        ua = entry.get("http_headers", {}).get("User-Agent", "")
+        print(f"[proxy] {video_id} → curl", flush=True)
+        # Log after clen/mime extraction below
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Referer": "https://www.youtube.com/",
-            "Origin": "https://www.youtube.com",
-            "Accept": "*/*",
-            "Accept-Encoding": "identity",
-        }
+        # curl -6 -L handles the sefc=1 auth redirect chain correctly:
+        # IPv6 matches the signed ip= param, -L follows googlevideo→youtube→CDN,
+        # -b sends cookies through all redirect hops.
+        # Extract actual mime type and content length from the CDN URL parameters
+        mime_m = re.search(r'[&?]mime=([^&]+)', url)
+        content_type = urllib.parse.unquote(mime_m.group(1)) if mime_m else "audio/mp4"
+        clen_m = re.search(r'[&?]clen=(\d+)', url)
+        total_bytes = int(clen_m.group(1)) if clen_m else entry.get("filesize")
+        print(f"[proxy] {video_id} mime={content_type} clen={total_bytes}", flush=True)
+
         range_header = request.headers.get("Range")
+
+        cmd = [
+            "curl", "-6", "-L", "-s", "--output", "-",
+            "-H", "Referer: https://www.youtube.com/",
+            "-H", "Accept: */*",
+            "-H", "Accept-Encoding: identity",
+        ]
+        if ua:
+            cmd += ["-H", f"User-Agent: {ua}"]
+        if os.path.exists(COOKIES_FILE):
+            cmd += ["-b", COOKIES_FILE]
         if range_header:
-            headers["Range"] = range_header
+            cmd += ["-H", f"Range: {range_header}"]
+        cmd.append(url)
 
-        r = http_requests.get(url, headers=headers, stream=True, timeout=30)
-        print(f"[proxy] {video_id} → HTTP {r.status_code} {r.headers.get('Content-Type', '?')}", flush=True)
-
-        if r.status_code not in (200, 206):
-            with _cache_lock:
-                _cache.pop(video_id, None)
-            return jsonify({"error": f"upstream returned {r.status_code}"}), 502
-
-        response_headers = {
-            "Content-Type":  r.headers.get("Content-Type", "audio/mp4"),
-            "Accept-Ranges": "bytes",
-        }
-        if "Content-Length" in r.headers:
-            response_headers["Content-Length"] = r.headers["Content-Length"]
-        if "Content-Range" in r.headers:
-            response_headers["Content-Range"] = r.headers["Content-Range"]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         def generate():
-            for chunk in r.iter_content(chunk_size=65536):
-                if chunk:
+            try:
+                while True:
+                    chunk = proc.stdout.read(65536)
+                    if not chunk:
+                        break
                     yield chunk
+            finally:
+                proc.stdout.close()
+                err = proc.stderr.read()
+                proc.stderr.close()
+                proc.wait()
+                if proc.returncode not in (0, 23):
+                    print(f"[proxy] {video_id} curl exit={proc.returncode} err={err[:200]}", flush=True)
+                    with _cache_lock:
+                        _cache.pop(video_id, None)
 
-        return Response(generate(), status=r.status_code, headers=response_headers)
+        resp_headers = {"Content-Type": content_type}
+        http_status = 200
+
+        if total_bytes:
+            resp_headers["Accept-Ranges"] = "bytes"
+            if range_header:
+                m = re.match(r'bytes=(\d+)-(\d*)', range_header)
+                if m:
+                    start = int(m.group(1))
+                    end = int(m.group(2)) if m.group(2) else total_bytes - 1
+                    end = min(end, total_bytes - 1)
+                    resp_headers["Content-Range"] = f"bytes {start}-{end}/{total_bytes}"
+                    resp_headers["Content-Length"] = str(end - start + 1)
+                    http_status = 206
+            else:
+                resp_headers["Content-Length"] = str(total_bytes)
+        # If total_bytes unknown: no Accept-Ranges, no Content-Length → progressive stream
+
+        return Response(
+            stream_with_context(generate()),
+            status=http_status,
+            headers=resp_headers,
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -182,40 +251,84 @@ def download():
     source_url = info["url"]
     title = info.get("title") or video_id
     safe_title = re.sub(r'[/\\:*?"<>|]', '_', title)
+    ua = info.get("http_headers", {}).get("User-Agent", "")
 
-    ffmpeg_cmd = [
-        FFMPEG_LOCATION or "ffmpeg",
-        "-headers", "User-Agent: Mozilla/5.0 (compatible)\r\nAccept: */*\r\n",
-        "-i", source_url,
-        "-vn",
-        "-f", "mp3",
-        "-q:a", "2",
-        "pipe:1",
+    mime_m = re.search(r'[&?]mime=([^&]+)', source_url)
+    mime = urllib.parse.unquote(mime_m.group(1)) if mime_m else "audio/mp4"
+
+    curl_cmd = [
+        "curl", "-6", "-L", "-s", "--max-time", "180",
+        "-H", "Referer: https://www.youtube.com/",
+        "-H", "Accept: */*",
+        "-H", "Accept-Encoding: identity",
     ]
+    if ua:
+        curl_cmd += ["-H", f"User-Agent: {ua}"]
+    if os.path.exists(COOKIES_FILE):
+        curl_cmd += ["-b", COOKIES_FILE]
+    curl_cmd.append(source_url)
 
     try:
-        proc = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        if mime == "audio/mp4":
+            # m4a/AAC — stream directly, no transcoding needed. iOS handles m4a natively.
+            print(f"[download] {video_id} → curl direct m4a", flush=True)
+            curl_proc = subprocess.Popen(curl_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+            def generate_direct():
+                try:
+                    while True:
+                        chunk = curl_proc.stdout.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    curl_proc.stdout.close()
+                    curl_proc.wait()
+
+            encoded_name = urllib.parse.quote(f"{safe_title}.m4a", safe='')
+            return Response(
+                stream_with_context(generate_direct()),
+                mimetype="audio/mp4",
+                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"},
+            )
+        else:
+            # webm/opus or other — transcode to mp3 via ffmpeg.
+            print(f"[download] {video_id} → curl|ffmpeg mp3 (mime={mime})", flush=True)
+            curl_proc = subprocess.Popen(curl_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            ffmpeg_cmd = [
+                FFMPEG_LOCATION or "ffmpeg",
+                "-i", "pipe:0",
+                "-vn", "-f", "mp3", "-q:a", "2",
+                "pipe:1",
+            ]
+            ffmpeg_proc = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=curl_proc.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            curl_proc.stdout.close()
+
+            def generate_transcode():
+                try:
+                    while True:
+                        chunk = ffmpeg_proc.stdout.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    ffmpeg_proc.stdout.close()
+                    ffmpeg_proc.wait()
+                    curl_proc.wait()
+
+            encoded_name = urllib.parse.quote(f"{safe_title}.mp3", safe='')
+            return Response(
+                stream_with_context(generate_transcode()),
+                mimetype="audio/mpeg",
+                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"},
+            )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-    def generate():
-        try:
-            while True:
-                chunk = proc.stdout.read(65536)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            proc.stdout.close()
-            proc.wait()
-
-    print(f"[download] {video_id} → streaming ffmpeg mp3", flush=True)
-    encoded_name = urllib.parse.quote(f"{safe_title}.mp3", safe='')
-    return Response(
-        stream_with_context(generate()),
-        mimetype="audio/mpeg",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"},
-    )
 
 
 @app.route("/related")

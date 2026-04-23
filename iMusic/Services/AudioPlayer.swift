@@ -676,7 +676,8 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @discardableResult
     private func streamYouTubeResult(_ result: YouTubeResult) async -> Bool {
         do {
-            let stream = try await StreamService.getStreamURL(for: result.id)
+            let nextID = youtubeIndex + 1 < youtubeQueue.count ? youtubeQueue[youtubeIndex + 1].id : nil
+            let stream = try await StreamService.getStreamURL(for: result.id, nextVideoId: nextID)
             guard let url = URL(string: stream.url) else { return false }
             let artist = stream.artist.trimmingCharacters(in: .whitespaces).isEmpty
                 ? result.artistName
