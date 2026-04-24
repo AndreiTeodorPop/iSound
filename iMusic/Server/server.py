@@ -7,6 +7,7 @@ import shutil
 import time
 import threading
 import urllib.parse
+import json
 import requests as http_requests
 import http.cookiejar
 
@@ -38,6 +39,29 @@ _cache = {}
 _cache_lock = threading.Lock()
 CACHE_TTL = 3600
 
+# Shared file cache so all gunicorn workers (separate processes) reuse extractions.
+_SHARED_CACHE_DIR = "/tmp/imusic_cache"
+os.makedirs(_SHARED_CACHE_DIR, exist_ok=True)
+
+def _shared_cache_read(video_id):
+    path = os.path.join(_SHARED_CACHE_DIR, f"{video_id}.json")
+    try:
+        with open(path) as f:
+            entry = json.load(f)
+        if entry.get("expires", 0) > time.time():
+            return entry
+    except Exception:
+        pass
+    return None
+
+def _shared_cache_write(video_id, entry):
+    path = os.path.join(_SHARED_CACHE_DIR, f"{video_id}.json")
+    try:
+        with open(path, "w") as f:
+            json.dump(entry, f)
+    except Exception:
+        pass
+
 
 
 
@@ -49,11 +73,8 @@ class _QuietLogger:
 
 
 _CLIENT_PROFILES = [
-      (["ios"],         ["webpage", "configs", "js"], False),
-      (["android"],     ["webpage", "configs", "js"], False),
-      (["mweb"],        ["webpage"],                True),
-      (["tv_embedded"], ["webpage"],                True),
-      (["web"],         ["webpage"],                True),
+    (["tv_embedded"], ["webpage"], True),
+    (["web"],         ["webpage"], True),
 ]
 
 def _fetch_info_ytdlp(video_id):
@@ -96,6 +117,9 @@ def _fetch_info_ytdlp(video_id):
     return None
 
 
+_inflight = {}
+_inflight_lock = threading.Lock()
+
 def _get_info(video_id):
     now = time.time()
     with _cache_lock:
@@ -103,15 +127,43 @@ def _get_info(video_id):
         if entry and entry["expires"] > now:
             return entry
 
-    entry = _fetch_info_ytdlp(video_id)
+    # Check shared file cache (readable by all gunicorn worker processes)
+    entry = _shared_cache_read(video_id)
+    if entry:
+        with _cache_lock:
+            _cache[video_id] = entry
+        return entry
 
-    if not entry:
-        print(f"[iMusic] failed for {video_id}", flush=True)
-        raise Exception("Could not fetch stream. Upload cookies.txt to /root/cookies.txt on the server.")
+    with _inflight_lock:
+        if video_id in _inflight:
+            wait_event = _inflight[video_id]
+            am_fetcher = False
+        else:
+            wait_event = threading.Event()
+            _inflight[video_id] = wait_event
+            am_fetcher = True
 
-    with _cache_lock:
-        _cache[video_id] = entry
-    return entry
+    if not am_fetcher:
+        wait_event.wait(timeout=30)
+        with _cache_lock:
+            entry = _cache.get(video_id)
+            if entry and entry["expires"] > time.time():
+                return entry
+        raise Exception("Could not fetch stream info — please try again.")
+
+    try:
+        entry = _fetch_info_ytdlp(video_id)
+        if not entry:
+            print(f"[iMusic] failed for {video_id}", flush=True)
+            raise Exception("Could not fetch stream. Upload cookies.txt to /root/cookies.txt on the server.")
+        with _cache_lock:
+            _cache[video_id] = entry
+        _shared_cache_write(video_id, entry)
+        return entry
+    finally:
+        with _inflight_lock:
+            _inflight.pop(video_id, None)
+        wait_event.set()
 
 
 @app.route("/")
@@ -210,6 +262,10 @@ def proxy():
                     print(f"[proxy] {video_id} curl exit={proc.returncode} err={err[:200]}", flush=True)
                     with _cache_lock:
                         _cache.pop(video_id, None)
+                    try:
+                        os.unlink(os.path.join(_SHARED_CACHE_DIR, f"{video_id}.json"))
+                    except OSError:
+                        pass
 
         resp_headers = {"Content-Type": content_type}
         http_status = 200
@@ -227,7 +283,6 @@ def proxy():
                     http_status = 206
             else:
                 resp_headers["Content-Length"] = str(total_bytes)
-        # If total_bytes unknown: no Accept-Ranges, no Content-Length → progressive stream
 
         return Response(
             stream_with_context(generate()),
@@ -244,89 +299,70 @@ def download():
     if not video_id:
         return jsonify({"error": "missing id"}), 400
 
-    info = _fetch_info_ytdlp(video_id)
-    if not info:
-        return jsonify({"error": "Could not fetch audio URL"}), 500
+    # Get title from cache (instant if already played), else extract
+    title = video_id
+    try:
+        cached = _get_info(video_id)
+        title = cached.get("title") or video_id
+    except Exception:
+        pass
 
-    source_url = info["url"]
-    title = info.get("title") or video_id
     safe_title = re.sub(r'[/\\:*?"<>|]', '_', title)
-    ua = info.get("http_headers", {}).get("User-Agent", "")
 
-    mime_m = re.search(r'[&?]mime=([^&]+)', source_url)
-    mime = urllib.parse.unquote(mime_m.group(1)) if mime_m else "audio/mp4"
-
-    curl_cmd = [
-        "curl", "-6", "-L", "-s", "--max-time", "180",
-        "-H", "Referer: https://www.youtube.com/",
-        "-H", "Accept: */*",
-        "-H", "Accept-Encoding: identity",
+    # yt-dlp downloads DASH fragments to a temp file (stdout doesn't work for DASH
+    # because fragment assembly requires a seekable output). --concurrent-fragments 4
+    # bypasses Google CDN per-connection throttling (~4x faster than single curl).
+    tmp_path = f"/tmp/imusic_{video_id}.m4a"
+    ytdlp_bin = shutil.which("yt-dlp") or "/root/venv/bin/yt-dlp"
+    cmd = [
+        ytdlp_bin,
+        "--extractor-args", "youtube:player_client=tv_embedded;player_skip=webpage",
+        "-f", "bestaudio[ext=m4a][vcodec=none]/bestaudio[vcodec=none]/140/251/250/249",
+        "--concurrent-fragments", "4",
+        "--no-warnings", "--force-overwrites",
+        "-o", tmp_path,
+        f"https://www.youtube.com/watch?v={video_id}",
     ]
-    if ua:
-        curl_cmd += ["-H", f"User-Agent: {ua}"]
     if os.path.exists(COOKIES_FILE):
-        curl_cmd += ["-b", COOKIES_FILE]
-    curl_cmd.append(source_url)
+        cmd += ["--cookies", COOKIES_FILE]
 
     try:
-        if mime == "audio/mp4":
-            # m4a/AAC — stream directly, no transcoding needed. iOS handles m4a natively.
-            print(f"[download] {video_id} → curl direct m4a", flush=True)
-            curl_proc = subprocess.Popen(curl_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        result = subprocess.run(cmd, timeout=300, capture_output=True)
+        if result.returncode != 0 or not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+            err = (result.stderr or b"").decode(errors="replace")[:200]
+            print(f"[download] {video_id} failed: {err}", flush=True)
+            try: os.unlink(tmp_path)
+            except OSError: pass
+            return jsonify({"error": "Download failed"}), 500
 
-            def generate_direct():
-                try:
+        file_size = os.path.getsize(tmp_path)
+        print(f"[download] {video_id} → {file_size} bytes m4a", flush=True)
+
+        def generate():
+            try:
+                with open(tmp_path, "rb") as f:
                     while True:
-                        chunk = curl_proc.stdout.read(65536)
+                        chunk = f.read(65536)
                         if not chunk:
                             break
                         yield chunk
-                finally:
-                    curl_proc.stdout.close()
-                    curl_proc.wait()
+            finally:
+                try: os.unlink(tmp_path)
+                except OSError: pass
 
-            encoded_name = urllib.parse.quote(f"{safe_title}.m4a", safe='')
-            return Response(
-                stream_with_context(generate_direct()),
-                mimetype="audio/mp4",
-                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"},
-            )
-        else:
-            # webm/opus or other — transcode to mp3 via ffmpeg.
-            print(f"[download] {video_id} → curl|ffmpeg mp3 (mime={mime})", flush=True)
-            curl_proc = subprocess.Popen(curl_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            ffmpeg_cmd = [
-                FFMPEG_LOCATION or "ffmpeg",
-                "-i", "pipe:0",
-                "-vn", "-f", "mp3", "-q:a", "2",
-                "pipe:1",
-            ]
-            ffmpeg_proc = subprocess.Popen(
-                ffmpeg_cmd,
-                stdin=curl_proc.stdout,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-            )
-            curl_proc.stdout.close()
-
-            def generate_transcode():
-                try:
-                    while True:
-                        chunk = ffmpeg_proc.stdout.read(65536)
-                        if not chunk:
-                            break
-                        yield chunk
-                finally:
-                    ffmpeg_proc.stdout.close()
-                    ffmpeg_proc.wait()
-                    curl_proc.wait()
-
-            encoded_name = urllib.parse.quote(f"{safe_title}.mp3", safe='')
-            return Response(
-                stream_with_context(generate_transcode()),
-                mimetype="audio/mpeg",
-                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"},
-            )
+        encoded_name = urllib.parse.quote(f"{safe_title}.m4a", safe='')
+        return Response(
+            stream_with_context(generate()),
+            mimetype="audio/mp4",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}",
+                "Content-Length": str(file_size),
+            },
+        )
+    except subprocess.TimeoutExpired:
+        try: os.unlink(tmp_path)
+        except OSError: pass
+        return jsonify({"error": "Download timed out"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
